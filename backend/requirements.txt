@@ -1,0 +1,12 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+python-multipart>=0.0.20,<1
+sqlalchemy[asyncio]>=2.0,<3
+aiosqlite>=0.20,<1
+alembic>=1.14,<2
+yt-dlp>=2025.1
+argon2-cffi>=23.1,<26
+PyJWT>=2.10,<3
+mutagen>=1.47,<2
+pytest>=8,<9
+httpx>=0.27,<1

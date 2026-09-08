@@ -1,0 +1,558 @@
+#app {
+  min-height: 100svh;
+}
+
+.app-layout {
+  min-height: 100svh;
+  padding-bottom: calc(var(--playerbar-height) + env(safe-area-inset-bottom));
+}
+
+.page {
+  width: min(100% - 2rem, var(--content-max-width));
+  margin: 0 auto;
+  padding: var(--space-8) 0;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+@media (min-width: 768px) {
+  .page {
+    width: min(100% - 4rem, var(--content-max-width));
+    padding: var(--space-10) 0;
+  }
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+
+.app-shell__content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  padding-top: var(--space-6);
+  padding-bottom: calc(
+    var(--playerbar-height) + var(--playerbar-mobile-extra) + var(--playerbar-margin) * 3
+    + var(--mobile-nav-height) + env(safe-area-inset-bottom)
+  );
+}
+
+.app-shell__content > .page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-content);
+  display: flex;
+  min-height: var(--header-height);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 0 calc(var(--space-4) + env(safe-area-inset-right)) 0 calc(var(--space-4) + env(safe-area-inset-left));
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-surface-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+@supports not (hanging-punctuation: first) {
+  .app-header {
+    -webkit-backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+    backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+  }
+}
+
+.app-header__logo {
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: 800;
+}
+
+.app-header__user {
+  overflow: hidden;
+  max-width: 50%;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sidebar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-player);
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--playerbar-margin);
+  padding-bottom: calc(var(--playerbar-margin) + env(safe-area-inset-bottom));
+  background: transparent;
+}
+
+.app-sidebar__nav {
+  display: inline-flex;
+  min-height: var(--mobile-nav-height);
+  align-items: center;
+  gap: var(--space-6);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: var(--glass-surface-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-float);
+}
+
+@supports not (hanging-punctuation: first) {
+  .app-sidebar__nav {
+    -webkit-backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+    backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+  }
+}
+
+.app-sidebar__link {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-full);
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .app-sidebar__link:hover {
+    transform: scale(1.08);
+  }
+}
+
+.app-sidebar__link:active {
+  transform: scale(0.88);
+}
+
+@keyframes nav-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  60% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.app-sidebar__link.router-link-active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  animation: nav-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.app-sidebar__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Подпись кнопки: на тач-устройствах не показывается вовсе (тап даёт
+   :focus-visible — пилюля не должна вылезать на телефоне). */
+.app-sidebar__label {
+  display: none;
+}
+
+.player-bar {
+  position: fixed;
+  bottom: calc(
+    var(--mobile-nav-height) + env(safe-area-inset-bottom) + var(--playerbar-margin) * 2
+  );
+  left: calc(var(--playerbar-margin) + env(safe-area-inset-left));
+  right: calc(var(--playerbar-margin) + env(safe-area-inset-right));
+  z-index: var(--z-player);
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'like cover info transport'
+    'seek seek seek seek';
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  min-height: var(--playerbar-height);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-float);
+  touch-action: none;
+  visibility: visible;
+  transition: transform var(--transition-normal), opacity var(--transition-normal), visibility 0s linear 0s;
+}
+
+@supports not (hanging-punctuation: first) {
+  .player-bar {
+    -webkit-backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+    backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+  }
+}
+
+.player-bar--dragging {
+  transition: none;
+}
+
+.player-bar__transport {
+  display: flex;
+  grid-area: transport;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.player-bar__skip {
+  display: none;
+}
+
+.player-bar__skip-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.player-bar--hidden {
+  transform: translateY(calc(100% + 3rem));
+  opacity: 0;
+  visibility: hidden;
+  transition: transform var(--transition-normal), opacity var(--transition-normal), visibility 0s linear var(--transition-normal);
+}
+
+.player-bar__cover {
+  display: grid;
+  grid-area: cover;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.player-bar__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-bar__cover svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.player-bar__info {
+  display: flex;
+  grid-area: info;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+/* Кнопка лайка плеера — размер и форма кнопки play; стоит слева от обложки.
+   Неликнутое — контур в muted-цвете, лайкнутое — заливка акцентом трека
+   (--track-accent) с тёмной иконкой, как у play. */
+.player-bar__like {
+  display: inline-flex;
+  grid-area: like;
+  align-self: center;
+  width: 3rem;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  background: transparent;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.player-bar__like-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.player-bar__like--liked {
+  color: #17121f;
+  background: var(--track-accent, var(--color-accent));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .player-bar__like:hover:not(:disabled):not(.player-bar__like--liked) {
+    color: var(--color-text);
+    background: color-mix(in srgb, var(--track-accent, var(--color-accent)) 14%, transparent);
+  }
+
+  .player-bar__like--liked:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--track-accent, var(--color-accent)) 78%, #ffffff);
+  }
+}
+
+.player-bar__like:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.player-bar__title {
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-bar__author {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-bar__error {
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+}
+
+.player-bar__seek {
+  display: flex;
+  grid-area: seek;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.player-bar__time {
+  flex-shrink: 0;
+  min-width: 2.75rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.player-bar__slider {
+  width: 100%;
+  min-width: 0;
+  height: var(--touch-target);
+  margin: 0;
+  accent-color: var(--track-accent, var(--color-accent));
+}
+
+/* Кнопка play и слайдеры перекрашиваются под цвет обложки играющего трека
+   (--track-accent приходит инлайном на .player-bar). */
+.player-bar__play {
+  display: inline-flex;
+  grid-area: play;
+  width: 3rem;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full);
+  color: #17121f;
+  background: var(--track-accent, var(--color-accent));
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .player-bar__play:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--track-accent, var(--color-accent)) 78%, #ffffff);
+  }
+}
+
+.player-bar__play:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.player-bar__play-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.player-bar__volume {
+  display: none;
+}
+
+.player-bar__volume-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+@media (min-width: 768px) {
+  .app-shell {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      'header'
+      'content';
+  }
+
+  .app-header {
+    grid-area: header;
+  }
+
+  /* Сайдбар-колонка больше не существует: навигация — вертикальный стек
+     круглых стеклянных кнопок у левого края, контент на всю ширину. */
+  .app-sidebar {
+    top: 50%;
+    bottom: auto;
+    right: auto;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 0 0 0 var(--nav-orb-dock-inset);
+    transform: translateY(-50%);
+  }
+
+  .app-sidebar__nav {
+    flex-direction: column;
+    gap: var(--space-3);
+    min-height: 0;
+    padding: var(--space-2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  /* Тултип-пилюля: только desktop. Появляется на hover/focus, после ухода
+     курсора растворяется — иконка неподвижна. */
+  .app-sidebar__label {
+    display: inline-block;
+    position: absolute;
+    left: calc(100% + 0.75rem);
+    top: 50%;
+    z-index: calc(var(--z-player) + 1);
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-full);
+    color: var(--color-text);
+    background: var(--glass-surface-strong);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--shadow-float);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(0, -50%) translateX(-0.5rem);
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+  }
+
+  @supports not (hanging-punctuation: first) {
+    .app-sidebar__label {
+      -webkit-backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+      backdrop-filter: url(#liquid-displacement) blur(var(--glass-blur-liquid)) saturate(var(--glass-saturate));
+    }
+  }
+
+  .app-sidebar__link:hover .app-sidebar__label,
+  .app-sidebar__link:focus-visible .app-sidebar__label {
+    opacity: 1;
+    transform: translate(0, -50%) translateX(0);
+  }
+
+  .app-shell__content {
+    grid-area: content;
+    padding-bottom: calc(
+      var(--playerbar-height) + var(--playerbar-margin) * 2 + env(safe-area-inset-bottom)
+    );
+  }
+
+  .player-bar {
+    bottom: calc(var(--playerbar-margin) + env(safe-area-inset-bottom));
+    grid-template-columns: auto auto minmax(0, 1fr) minmax(10rem, 18rem) auto auto auto;
+    grid-template-areas: 'like cover info seek transport volume';
+    gap: var(--space-3);
+  }
+
+  .player-bar__transport {
+    gap: var(--space-1);
+  }
+
+  .player-bar__skip {
+    display: inline-flex;
+    width: var(--touch-target);
+    min-height: var(--touch-target);
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    background: transparent;
+    transition: color var(--transition-fast), background-color var(--transition-fast);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .player-bar__skip:hover:not(:disabled) {
+      color: var(--color-text);
+      background: color-mix(in srgb, var(--track-accent, var(--color-accent)) 16%, transparent);
+    }
+  }
+
+  .player-bar__skip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .player-bar__volume {
+    display: flex;
+    grid-area: volume;
+    align-items: center;
+    gap: var(--space-2);
+    width: 7rem;
+  }
+}
