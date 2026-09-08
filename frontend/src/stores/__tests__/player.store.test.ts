@@ -767,4 +767,87 @@ describe('player store', () => {
     player.playTrack(createTrack({ id: 3, audio_url: '/stream/3' }))
     expect(controller.load).not.toHaveBeenCalledWith('/stream/3')
   })
+
+  it('clears stale prefetch queue when a new context is selected', () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    // Первая сессия: prefetch наполнил очередь треками 51–52.
+    player.playTrack(createTrack({ id: 50, audio_url: '/stream/50' }))
+    player.addToQueue(createTrack({ id: 51, audio_url: '/stream/51', title: 'Stale A' }))
+    player.addToQueue(createTrack({ id: 52, audio_url: '/stream/52', title: 'Stale B' }))
+
+    // Новый контекст из начала библиотеки.
+    const list = [
+      createTrack({ id: 5, audio_url: '/stream/5' }),
+      createTrack({ id: 6, audio_url: '/stream/6' }),
+    ]
+    player.playFromList(list[0] as Track, list)
+
+    expect(player.queue).toHaveLength(0)
+
+    // По ended должен играть сосед по новому контексту, а не трек 51.
+    player.audioEnded()
+    expect(player.currentTrack?.id).toBe(6)
+    expect(controller.load).toHaveBeenLastCalledWith('/stream/6')
+  })
+
+  it('does not replay listened tracks returned by the supplier', async () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    // Supplier имитирует сброс курсора библиотеки: возвращает страницу,
+    // содержащую уже прослушанный трек 1 и новый трек 2.
+    player.setQueueSupplier(async () => [
+      createTrack({ id: 1, audio_url: '/stream/1' }),
+      createTrack({ id: 2, audio_url: '/stream/2' }),
+    ])
+
+    player.playTrack(createTrack({ id: 1, audio_url: '/stream/1' }))
+    player.audioPlaying()
+    await flushPromises()
+
+    // Prefetch не должен вернуть прослушанный трек 1 в очередь.
+    expect(player.queue.map((track) => track.id)).toEqual([2])
+
+    player.audioEnded()
+    expect(player.currentTrack?.id).toBe(2)
+  })
+
+  it('playPrevious returns to the previously played track outside the context', () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    // Контекст пуст (ручная очередь): трек 7 играл раньше, сейчас играет 8.
+    player.playTrack(createTrack({ id: 7, audio_url: '/stream/7' }))
+    player.audioPlaying()
+    player.playTrack(createTrack({ id: 8, audio_url: '/stream/8' }))
+
+    player.playPrevious()
+
+    expect(player.currentTrack?.id).toBe(7)
+    expect(controller.load).toHaveBeenLastCalledWith('/stream/7')
+  })
+
+  it('playPrevious falls back to history after queue playback from a context head', () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    const list = [createTrack({ id: 1, audio_url: '/stream/1' })]
+    player.playFromList(list[0] as Track, list)
+    player.audioPlaying()
+
+    // Из очереди (не из контекста) включается другой трек.
+    player.playTrack(createTrack({ id: 9, audio_url: '/stream/9' }))
+
+    // Назад по контексту некуда (голова) — должен вернуть трек 1 по истории.
+    player.playPrevious()
+
+    expect(player.currentTrack?.id).toBe(1)
+    expect(controller.load).toHaveBeenLastCalledWith('/stream/1')
+  })
 })
