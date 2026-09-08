@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchLikes, removeLike } from '@/api/likes-api'
+import { fetchLikes, fetchLikedTrackIds, removeLike } from '@/api/likes-api'
 import { fetchListeningStats } from '@/api/events-api'
 import SettingsView from '../SettingsView.vue'
 import { useAuthStore } from '@/stores/auth.store'
@@ -16,12 +16,14 @@ vi.mock('@/api/events-api', () => ({
 
 vi.mock('@/api/likes-api', () => ({
   fetchLikes: vi.fn(),
+  fetchLikedTrackIds: vi.fn(),
   addLike: vi.fn(),
   removeLike: vi.fn(),
 }))
 
 const mockedStats = vi.mocked(fetchListeningStats)
 const mockedFetchLikes = vi.mocked(fetchLikes)
+const mockedFetchLikedTrackIds = vi.mocked(fetchLikedTrackIds)
 const mockedRemove = vi.mocked(removeLike)
 
 function createTrack(overrides: Partial<Track> = {}): Track {
@@ -73,6 +75,7 @@ describe('SettingsView (личный кабинет)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockedStats.mockResolvedValue(statsFixture())
+    mockedFetchLikedTrackIds.mockResolvedValue([1])
     mockedFetchLikes.mockResolvedValue({
       items: [{ track: createTrack(), created_at: '2026-09-01T00:00:00Z' }],
       total: 1,

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { addLike, fetchLikes, removeLike } from '@/api/likes-api'
+import { addLike, fetchLikedTrackIds, fetchLikes, removeLike } from '@/api/likes-api'
 import { fetchListeningStats } from '@/api/events-api'
 import { useAuthStore } from '@/stores/auth.store'
 import { useNotificationsStore } from '@/stores/notifications.store'
@@ -37,9 +37,16 @@ export const useProfileStore = defineStore('profile', () => {
   const hasLikes = computed(() => likedTracks.value.length > 0)
   const hasMoreLikes = computed(() => likesCursor.value < likesTotal.value)
 
-  function applyLikes(tracks: Track[], total: number): void {
+  // Полный набор лайкнутых id (все страницы) — источник для сердечек.
+  // Живёт независимо от постраничного списка likedTracks: список «Любимого»
+  // догружается лениво, а сердечки должны быть готовы сразу во всей библиотеке.
+  function setLikedTrackIds(trackIds: number[]): void {
+    likedTrackIds.value = new Set(trackIds)
+  }
+
+  // Сброс/замена постраничного списка «Любимого» (без правки набора сердечек).
+  function applyLikedTracks(tracks: Track[], total: number): void {
     likedTracks.value = tracks
-    likedTrackIds.value = new Set(tracks.map((track) => track.id))
     likesTotal.value = total
     likesCursor.value = tracks.length
   }
@@ -57,8 +64,9 @@ export const useProfileStore = defineStore('profile', () => {
     statsError.value = null
     likesError.value = null
 
-    const [statsResult, likesResult] = await Promise.allSettled([
+    const [statsResult, idsResult, likesResult] = await Promise.allSettled([
       fetchListeningStats(),
+      fetchLikedTrackIds(),
       fetchLikes({ limit: LIKES_PAGE_LIMIT, offset: 0 }),
     ])
 
@@ -68,8 +76,14 @@ export const useProfileStore = defineStore('profile', () => {
       statsError.value = 'Не удалось загрузить статистику'
     }
 
+    if (idsResult.status === 'fulfilled' && Array.isArray(idsResult.value)) {
+      setLikedTrackIds(idsResult.value)
+    } else {
+      likesError.value = 'Не удалось загрузить любимые треки'
+    }
+
     if (likesResult.status === 'fulfilled' && Array.isArray(likesResult.value?.items)) {
-      applyLikes(likesResult.value.items.map((item) => item.track), likesResult.value.total)
+      applyLikedTracks(likesResult.value.items.map((item) => item.track), likesResult.value.total)
     } else {
       likesError.value = 'Не удалось загрузить любимые треки'
     }
@@ -84,7 +98,8 @@ export const useProfileStore = defineStore('profile', () => {
   // покажут спиннеры) и грузим stats + likes заново.
   async function reloadProfile(): Promise<void> {
     stats.value = null
-    applyLikes([], 0)
+    applyLikedTracks([], 0)
+    setLikedTrackIds([])
     isLoaded.value = false
     await loadProfile()
   }
@@ -116,7 +131,6 @@ export const useProfileStore = defineStore('profile', () => {
           .map((item) => item.track)
           .filter((track) => !knownIds.has(track.id))
         likedTracks.value = [...likedTracks.value, ...fresh]
-        likedTrackIds.value = new Set(likedTracks.value.map((track) => track.id))
         likesCursor.value += response.items.length
         likesTotal.value = response.total
         likesError.value = null
@@ -138,7 +152,7 @@ export const useProfileStore = defineStore('profile', () => {
       if (!Array.isArray(response?.items)) {
         throw new Error('Malformed likes response')
       }
-      applyLikes(response.items.map((item) => item.track), response.total)
+      applyLikedTracks(response.items.map((item) => item.track), response.total)
       likesError.value = null
     } catch {
       likesError.value = 'Не удалось загрузить любимые треки'
@@ -215,7 +229,8 @@ export const useProfileStore = defineStore('profile', () => {
 
   auth.onSessionTeardown(() => {
     stats.value = null
-    applyLikes([], 0)
+    applyLikedTracks([], 0)
+    setLikedTrackIds([])
     togglingIds.value = new Set()
     isLoading.value = false
     isLoaded.value = false

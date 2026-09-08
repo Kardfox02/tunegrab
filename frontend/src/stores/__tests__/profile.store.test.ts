@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { addLike, fetchLikes, removeLike } from '@/api/likes-api'
+import { addLike, fetchLikedTrackIds, fetchLikes, removeLike } from '@/api/likes-api'
 import { fetchListeningStats } from '@/api/events-api'
 import { useAuthStore } from '@/stores/auth.store'
 import { useNotificationsStore } from '@/stores/notifications.store'
@@ -15,11 +15,13 @@ vi.mock('@/api/events-api', () => ({
 
 vi.mock('@/api/likes-api', () => ({
   fetchLikes: vi.fn(),
+  fetchLikedTrackIds: vi.fn(),
   addLike: vi.fn(),
   removeLike: vi.fn(),
 }))
 
 const mockedFetchLikes = vi.mocked(fetchLikes)
+const mockedFetchLikedTrackIds = vi.mocked(fetchLikedTrackIds)
 const mockedAdd = vi.mocked(addLike)
 const mockedRemove = vi.mocked(removeLike)
 const mockedStats = vi.mocked(fetchListeningStats)
@@ -58,6 +60,7 @@ describe('profile store', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockedStats.mockResolvedValue(statsFixture())
+    mockedFetchLikedTrackIds.mockResolvedValue([1, 2])
     mockedFetchLikes.mockResolvedValue({
       items: [
         { track: createTrack({ id: 1 }), created_at: '2026-09-01T00:00:00Z' },
@@ -82,6 +85,61 @@ describe('profile store', () => {
     expect(profile.stats?.play_count).toBe(3)
   })
 
+  it('marks hearts for tracks beyond the first likes page right after load', async () => {
+    // 60 лайков: ids приходят все из /likes/ids, а список — только первая партия.
+    mockedFetchLikedTrackIds.mockResolvedValueOnce(
+      Array.from({ length: 60 }, (_, index) => index + 1),
+    )
+    mockedFetchLikes.mockResolvedValueOnce({
+      items: Array.from({ length: 50 }, (_, index) => ({
+        track: createTrack({ id: index + 1 }),
+        created_at: '2026-09-01T00:00:00Z',
+      })),
+      total: 60,
+      limit: 50,
+      offset: 0,
+    })
+    const profile = useProfileStore()
+    await profile.loadProfile()
+
+    expect(profile.likedTrackIds.size).toBe(60)
+    expect(profile.likedTrackIds.has(51)).toBe(true)
+    expect(profile.likedTrackIds.has(60)).toBe(true)
+    // Список «Любимое» пока содержит только первую партию.
+    expect(profile.likedTracks).toHaveLength(50)
+  })
+
+  it('keeps heart ids untouched when the next likes page loads', async () => {
+    mockedFetchLikedTrackIds.mockResolvedValueOnce(
+      Array.from({ length: 60 }, (_, index) => index + 1),
+    )
+    mockedFetchLikes.mockResolvedValueOnce({
+      items: Array.from({ length: 50 }, (_, index) => ({
+        track: createTrack({ id: index + 1 }),
+        created_at: '2026-09-01T00:00:00Z',
+      })),
+      total: 60,
+      limit: 50,
+      offset: 0,
+    })
+    const profile = useProfileStore()
+    await profile.loadProfile()
+
+    mockedFetchLikes.mockResolvedValueOnce({
+      items: Array.from({ length: 10 }, (_, index) => ({
+        track: createTrack({ id: 51 + index }),
+        created_at: '2026-09-02T00:00:00Z',
+      })),
+      total: 60,
+      limit: 50,
+      offset: 50,
+    })
+    await profile.loadNextLikes()
+
+    expect(profile.likedTracks).toHaveLength(60)
+    expect(profile.likedTrackIds.size).toBe(60)
+  })
+
   it('forces reload when requested', async () => {
     const profile = useProfileStore()
 
@@ -99,6 +157,7 @@ describe('profile store', () => {
     expect(profile.likedTrackIds.has(1)).toBe(true)
 
     mockedStats.mockResolvedValueOnce(statsFixture({ play_count: 42 }))
+    mockedFetchLikedTrackIds.mockResolvedValueOnce([9])
     mockedFetchLikes.mockResolvedValueOnce({
       items: [{ track: createTrack({ id: 9, title: 'Fresh' }), created_at: '2026-09-03T00:00:00Z' }],
       total: 1,
@@ -110,6 +169,7 @@ describe('profile store', () => {
 
     expect(mockedStats).toHaveBeenCalledTimes(2)
     expect(mockedFetchLikes).toHaveBeenCalledTimes(2)
+    expect(mockedFetchLikedTrackIds).toHaveBeenCalledTimes(2)
     expect(profile.stats?.play_count).toBe(42)
     expect(profile.likedTrackIds.has(9)).toBe(true)
     expect(profile.likedTrackIds.has(1)).toBe(false)
@@ -207,8 +267,10 @@ describe('profile store', () => {
       offset: 0,
     })
     await profile.refreshLikes()
-    expect(profile.likedTrackIds.size).toBe(0)
+    // refreshLikes обновляет только постраничный список; сердечки живут из /likes/ids.
+    expect(profile.likedTracks).toHaveLength(0)
     expect(profile.likesTotal).toBe(0)
+    expect(profile.likedTrackIds.size).toBe(2)
 
     mockedStats.mockResolvedValueOnce(statsFixture({ play_count: 10 }))
     await profile.refreshStats()
