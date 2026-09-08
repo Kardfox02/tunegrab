@@ -71,12 +71,19 @@ export const usePlayerStore = defineStore('player', () => {
   const hasCurrentTrack = computed(() => currentTrack.value !== null)
   const isQueueEmpty = computed(() => queue.value.length === 0)
 
-  let audioController: PlayerAudioController | null = null
-  let queueSupplier: ((lastTrackId: number) => Promise<Track[]>) | null = null
-  let playbackEpoch = 0
-  let extensionInFlight = false
-  let contextList: Track[] = []
-  let contextIndex = -1
+let audioController: PlayerAudioController | null = null
+let queueSupplier: ((lastTrackId: number) => Promise<Track[]>) | null = null
+let playbackEpoch = 0
+let extensionInFlight = false
+let contextList: Track[] = []
+let contextIndex = -1
+// История проигранных треков (от старых к новым, ограничена): для
+// playPrevious в режиме ручной очереди, где контекст не двигается.
+const PLAYBACK_HISTORY_LIMIT = 100
+let playbackHistory: Track[] = []
+// Все треки, уже запускавшиеся в текущем контексте: поставщик очереди и
+// fallback по ended не должны возвращать прослушанное заново.
+let playedTrackIds = new Set<number>()
   let recoveryAttempts = 0
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null
   let stallTimer: ReturnType<typeof setTimeout> | null = null
@@ -256,6 +263,8 @@ export const usePlayerStore = defineStore('player', () => {
     resetListenedTime()
     contextList = []
     contextIndex = -1
+    playbackHistory = []
+    playedTrackIds = new Set<number>()
     currentTrack.value = null
     queue.value = []
     isPlaying.value = false
@@ -283,6 +292,14 @@ export const usePlayerStore = defineStore('player', () => {
     resetRecovery()
     reportedPlayTrackId = null
     resetListenedTime()
+    if (currentTrack.value && currentTrack.value.id !== track.id) {
+      // Воспроизведение ушло с текущего трека — запоминаем его для playPrevious.
+      playbackHistory.push(currentTrack.value)
+      if (playbackHistory.length > PLAYBACK_HISTORY_LIMIT) {
+        playbackHistory = playbackHistory.slice(-PLAYBACK_HISTORY_LIMIT)
+      }
+    }
+    playedTrackIds.add(track.id)
     currentTrack.value = track
     position.value = 0
     duration.value = track.duration ?? 0
@@ -295,6 +312,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   function playFromList(track: Track, list: Track[]): void {
     const index = list.findIndex((item) => item.id === track.id)
+
+    // Новый контекст вытесняет всё прежнее: оставшийся prefetch в очереди
+    // иначе перехватил бы воспроизведение по ended (приоритет очереди) и
+    // играл «чужие» треки из предыдущей сессии.
+    queue.value = []
+    playbackHistory = []
+    playedTrackIds = new Set<number>()
 
     if (index >= 0) {
       contextList = [...list]
@@ -420,6 +444,32 @@ export const usePlayerStore = defineStore('player', () => {
     if (prevIndex >= 0) {
       contextIndex = prevIndex
       playTrack(contextList[prevIndex] as Track)
+      return
+    }
+
+    // Фолбэк истории — только когда текущий трек вне контекста (режим ручной
+    // очереди): в голове контекста «назад» идти некуда, как и раньше.
+    const current = currentTrack.value
+    if (current !== null && contextList.some((item) => item.id === current.id)) {
+      return
+    }
+
+    while (playbackHistory.length > 0) {
+      const candidate = playbackHistory.pop()
+      if (candidate === undefined) {
+        break
+      }
+      if (current?.id === candidate.id) {
+        continue
+      }
+      if (isPlayable(candidate)) {
+        const index = contextList.findIndex((item) => item.id === candidate.id)
+        if (index >= 0) {
+          contextIndex = index
+        }
+        playTrack(candidate)
+        return
+      }
     }
   }
 
@@ -437,8 +487,13 @@ export const usePlayerStore = defineStore('player', () => {
       if (epochAtStart !== playbackEpoch) {
         return
       }
-      const knownIds = new Set<number>(contextList.map((item) => item.id))
-      knownIds.add(current.id)
+      // В supplier может приехать уже прослушанная страница (сброс курсора
+      // библиотеки после library.load(), например при завершении загрузки) —
+      // фильтруем всё, что уже играло в этом контексте.
+      const knownIds = new Set<number>(playedTrackIds)
+      for (const item of contextList) {
+        knownIds.add(item.id)
+      }
       for (const item of queue.value) {
         knownIds.add(item.id)
       }
@@ -549,7 +604,13 @@ export const usePlayerStore = defineStore('player', () => {
         return
       }
 
-      const knownIds = new Set<number>([current.id])
+      const knownIds = new Set<number>(playedTrackIds)
+      for (const item of contextList) {
+        knownIds.add(item.id)
+      }
+      for (const item of queue.value) {
+        knownIds.add(item.id)
+      }
       const playable = fetched.filter((item) => isPlayable(item) && !knownIds.has(item.id))
       if (playable.length === 0) {
         isLoading.value = false

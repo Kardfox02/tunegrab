@@ -26,6 +26,7 @@ export function useSwipeSwitch(options: UseSwipeSwitchOptions): UseSwipeSwitchRe
   const isDragging = ref(false)
   const offsetX = ref(0)
   let startX = 0
+  let startY = 0
   let activePointerId: number | null = null
 
   const dragStyle = computed<Record<string, string>>(() => {
@@ -58,6 +59,7 @@ export function useSwipeSwitch(options: UseSwipeSwitchOptions): UseSwipeSwitchRe
     isDragging.value = true
     activePointerId = event.pointerId
     startX = event.clientX
+    startY = event.clientY
     offsetX.value = 0
   }
 
@@ -76,10 +78,16 @@ export function useSwipeSwitch(options: UseSwipeSwitchOptions): UseSwipeSwitchRe
     const length = options.getLength()
     const threshold = length > 0 ? length * thresholdRatio : Number.POSITIVE_INFINITY
     const drift = offsetX.value
+    const driftY = event.clientY - startY
 
     isDragging.value = false
     activePointerId = null
     offsetX.value = 0
+
+    // Вертикальное движение доминирует — это скролл страницы, не свайп.
+    if (Math.abs(driftY) > Math.abs(drift)) {
+      return
+    }
 
     if (Math.abs(drift) >= threshold) {
       options.onSwipe(drift < 0 ? 'left' : 'right')
