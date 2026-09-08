@@ -4,6 +4,12 @@
 
 Фронтенд Tunegrab — адаптивное SPA для двух пользователей. Он предоставляет доступ к общей музыкальной библиотеке, поиску и загрузке аудио с YouTube, а также к воспроизведению треков через серверный стриминг.
 
+Назначение (виды):
+
+- **Библиотека** (`/library`) — общая коллекция треков;
+- **Поиск** (`/search`) — поиск YouTube, загрузки, локальный upload;
+- **Профиль** (`/settings`) — личный кабинет.
+
 Реализованный функционал:
 
 - авторизация: регистрация, вход, выход, восстановление сессии по cookie;
@@ -13,6 +19,8 @@
 - постановка загрузок в очередь, прогресс, отмена и повтор;
 - восстановление активных загрузок после перезагрузки страницы;
 - воспроизведение через `<audio>` с очередью, сквозным воспроизведением по библиотеке и Media Session API;
+- лайки (сердечки в библиотеке и плеере, оптимистичный toggle);
+- личный кабинет: статистика прослушиваний с переключателем периода, список «Любимое»;
 - тосты-уведомления.
 
 ## 2. Технологический стек
@@ -40,7 +48,7 @@
 
 ```text
 Vite :8080 (host: true, allowedHosts: [rknshit.com])
-  └── proxy /auth, /tracks, /youtube, /stream, /covers
+  └── proxy /auth, /tracks, /youtube, /stream, /covers, /events, /likes
           ↓
       FastAPI :8000
 ```
@@ -51,17 +59,9 @@ Vite :8080 (host: true, allowedHosts: [rknshit.com])
 
 Команды: `npm run dev`, `npm run build`, `npm run preview`, `npm test` / `npm run test:watch`, `npm run typecheck`.
 
-### Production
+### Production-сборка
 
-Vite собирает приложение в `frontend/dist`. `npm run build` сначала прогоняет `vue-tsc -b` (типизация — часть сборки), затем `vite build`. Раздачу `dist` обеспечивает FastAPI с одного origin (mount статики + SPA fallback на `index.html`):
-
-```text
-/auth/*, /tracks/*, /youtube/*, /stream/*, /covers/* → backend API / static mounts
-/assets/*                                            → dist/assets/* (хешированные имена)
-остальные GET-маршруты SPA                           → dist/index.html
-```
-
-SPA fallback не перехватывает API-запросы и ошибки API.
+`npm run build` сначала прогоняет `vue-tsc -b` (типизация — часть сборки), затем `vite build` — приложение собирается в `frontend/dist` с хешированными именами ассетов. Раздача собранной сборки backend'ом (mount статики + SPA fallback) **не реализована** — сейчас сервис эксплуатируется в dev-режиме (Vite proxy).
 
 ### PWA-манифест
 
@@ -76,8 +76,9 @@ frontend/
 ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
 ├── package.json
 ├── public/
-│   ├── favicon.png / favicon.svg
+│   ├── favicon.png
 │   ├── icons.svg
+│   ├── theme1.jpg / theme1-vertical.jpg   # фоновые изображения (см. §11)
 │   └── manifest.webmanifest
 └── src/
     ├── api/                         # транспорт: HTTP-клиент и функции по доменам
@@ -85,6 +86,8 @@ frontend/
     │   ├── auth-api.ts              #   /auth/*
     │   ├── tracks-api.ts            #   /tracks: список, удаление, upload MP3
     │   ├── youtube-api.ts           #   /youtube/*: поиск, загрузки, cancel, retry
+    │   ├── events-api.ts            #   /events: запись события, stats
+    │   ├── likes-api.ts             #   /likes: список, ids, PUT, DELETE
     │   └── index.ts                 #   re-export публичного API-слоя
     ├── components/
     │   ├── AppShell.vue             # каркас защищённой области + привязка queueSupplier
@@ -107,6 +110,7 @@ frontend/
     │   ├── library.store.ts
     │   ├── downloads.store.ts
     │   ├── player.store.ts
+    │   ├── profile.store.ts        # кабинет: stats, лайки, сердечки (likedTrackIds)
     │   └── notifications.store.ts
     ├── router/
     │   └── index.ts                 # createAppRouter(pinia, history)
@@ -115,13 +119,15 @@ frontend/
     │   ├── RegisterView.vue
     │   ├── LibraryView.vue
     │   ├── SearchView.vue
-    │   └── SettingsView.vue         # заглушка (см. §12)
+    │   └── SettingsView.vue         # личный кабинет (см. §12)
     ├── types/
     │   ├── api.ts                   # Paginated<T>
     │   ├── auth.ts                  # User, AuthResponse, payloads
     │   ├── errors.ts                # ApiError, isApiError, apiErrorFromAxios
     │   ├── track.ts                 # Track, статусы, сортировка
-    │   └── youtube.ts               # поиск/загрузка/active-контракты
+    │   ├── youtube.ts               # поиск/загрузка/active-контракты
+    │   ├── events.ts                # события прослушиваний, статистика
+    │   └── likes.ts                 # контракты лайков
     ├── composables/
     │   ├── useDebouncedSearch.ts    # debounce + AbortGroup + state машины запроса
     │   ├── usePolling.ts            # createPolling: интервалы, visibilitychange
@@ -345,14 +351,15 @@ GET  /covers/{cover_name}  (браузер напрямую, <img>)
 События и лайки (`events-api.ts`, `likes-api.ts`):
 
 ```text
-POST /events                                           → 201 ListenEvent
+POST /events                                           → 201 (тело игнорируется фронтендом)
 GET  /events/me/stats?period_days=1|7|30 (1–30, def 7) → ListeningStats
-GET  /events/me/history?limit=&offset=                 → ListeningHistoryResponse
 GET  /likes                                            → LikeListResponse (пагинация)
 GET  /likes/ids                                        → { track_ids: number[] } (все id сразу)
 PUT    /likes/{track_id}                               → 200|201 Like
 DELETE /likes/{track_id}                               → 204
 ```
+
+`GET /events/me/history` (ListeningHistoryResponse с пагинацией) существует в backend-контракте и в `types/events.ts`, но фронтенд его не использует — history-api в `events-api.ts` отсутствует.
 
 Правила работы с URL и полями:
 
@@ -482,6 +489,7 @@ Layout (`styles/layout.css`):
 | `views/__tests__/library-view.test.ts` | рендер строк и счётчик, debounce-поиск → URL, сортировка → URL, сентинел/спиннер догрузки, play через store, сквозное воспроизведение в следующую партию, локальное удаление, live-прогресс |
 | `views/__tests__/search-view.test.ts` | рендер результатов, empty/error/429-retry, постановка загрузок и статусы кнопок, upload (успех/ошибка/disabled), обновление библиотеки после upload |
 | `views/__tests__/auth-views.test.ts` | login с `redirect`, register |
+| `views/__tests__/settings-view.test.ts` | кабинет: статистика и переключатель периода, секция «Любимое», заглушка плейлистов, logout |
 | `components/__tests__/player-bar.test.ts` | связь audio events ↔ store, исполнение команд, инпуты seek/volume, восстановление стрима после `error` вместо финальной ошибки |
 | `components/__tests__/app-shell.test.ts` | protected shell: навигация + пользователь |
 | `composables/__tests__/use-debounced-search.test.ts` | debounce, minLength, abort, ошибки |
