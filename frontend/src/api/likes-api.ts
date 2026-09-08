@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { LikeListResponse } from '@/types/likes'
+import type { LikedTrackIdsResponse, LikeListResponse } from '@/types/likes'
 
 export interface LikesQuery {
   limit?: number
@@ -12,6 +12,15 @@ export async function fetchLikes(query: LikesQuery = {}, signal?: AbortSignal): 
     signal,
   })
   return response.data
+}
+
+export async function fetchLikedTrackIds(signal?: AbortSignal): Promise<number[]> {
+  const response = await apiClient.get<LikedTrackIdsResponse>('/likes/ids', { signal })
+  const trackIds = response.data?.track_ids
+  if (!Array.isArray(trackIds)) {
+    throw new Error('Malformed liked track ids response')
+  }
+  return trackIds
 }
 
 export async function addLike(trackId: number): Promise<void> {

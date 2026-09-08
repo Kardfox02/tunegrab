@@ -11,3 +11,7 @@ export interface LikeListResponse {
   limit: number
   offset: number
 }
+
+export interface LikedTrackIdsResponse {
+  track_ids: number[]
+}

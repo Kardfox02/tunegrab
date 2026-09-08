@@ -287,7 +287,9 @@ Media Session: `services/media-session.service.ts` оборачивает `navig
 
 Личные данные пользователя (кабинет + сердечки в списках). Состояние: `stats` (период задаёт вызывающий, по умолчанию 7 дней), `likedTracks`, `likedTrackIds` (Set — источник для сердечек), `togglingIds`, `likesTotal`/`likesCursor`/`hasMoreLikes` (серверная пагинация), флаги загрузки/ошибок.
 
-- `loadProfile(force = false)` — лениво один раз за сессию (параллельно stats + первая партия likes), вызывается из `SettingsView` и `LibraryView` (сердечкам нужен набор лайков);
+- `loadProfile(force = false)` — лениво один раз за сессию (параллельно stats + **полный набор лайкнутых id** через `GET /likes/ids` + первая партия likes), вызывается из `SettingsView` и `LibraryView` (сердечкам нужен набор лайков);
+  - `likedTrackIds` и постраничный список `likedTracks` — **независимые состояния**: ids приходят одним лёгким запросом сразу для всех лайков пользователя и работают во всей библиотеке и плеере; список «Любимое» догружается партиями и на сердечки не влияет — лайк на треке за пределами первой партии виден без прокрутки списка (раньше сердечко появлялось только после дозагрузки «Любимого» до этого трека);
+- `refreshLikes()` — перезагружает только постраничный список «Любимого»; `likedTrackIds` не трогает (их источник — `GET /likes/ids` и оптимистичный toggle);
 - `refreshStats(periodDays?)` — перезагрузка только статистики (опциональный период пробрасывается в `GET /events/me/stats?period_days=...`); вызывается переключателем периода и поллингом в `SettingsView`;
 - «Любимое» — **дозагрузка при скролле**, как в библиотеке: `loadNextLikes()` по партиям 50 (сентинел `useInfiniteScroll`), дедупликация параллельных вызовов одним Promise, фильтрация дублей (offset + оптимистичные удаления);
 - `toggleLike(track)` — **оптимистичный toggle**: Set + список + счётчик обновляются мгновенно, при ошибке — откат и тост; идемпотентность бэка гасит гонки двойных тапов;
@@ -346,6 +348,8 @@ GET  /covers/{cover_name}  (браузер напрямую, <img>)
 POST /events                                           → 201 ListenEvent
 GET  /events/me/stats?period_days=1|7|30 (1–30, def 7) → ListeningStats
 GET  /events/me/history?limit=&offset=                 → ListeningHistoryResponse
+GET  /likes                                            → LikeListResponse (пагинация)
+GET  /likes/ids                                        → { track_ids: number[] } (все id сразу)
 PUT    /likes/{track_id}                               → 200|201 Like
 DELETE /likes/{track_id}                               → 204
 ```
@@ -473,6 +477,7 @@ Layout (`styles/layout.css`):
 | `stores/__tests__/library.store.test.ts` | applyRouteQuery + нормализация, stale-ответы, ошибки + retry, локальное удаление (204/409), `loadNextPage` + дедупликация вызовов и дублей списка, offset 0 при загрузке, отмена prefetch обычной загрузкой, reset по teardown |
 | `stores/__tests__/downloads.store.test.ts` | restore + polling, терминальные статусы, связь с результатами поиска, дедупликация, stale generation (cancel/retry/reset), скрытая вкладка, teardown, abort in-flight |
 | `stores/__tests__/player.store.test.ts` | команды адаптера, персист громкости, контекст prev/next с пропуском неготовых, prefetch supplier, fallback `ended`, эпохи против гонок, очередь, removeTrack, teardown, автовосстановление стрима (retry с позицией, лимит попыток, stall-watchdog, сброс при смене трека/паузе) |
+| `stores/__tests__/profile.store.test.ts` | ленивая загрузка один раз за сессию, сердечки из `/likes/ids` видны для лайков за пределами первой партии списка, догрузка «Любимого» не перезаписывает ids, reloadProfile, оптимистичный toggle + откат, дедупликация страниц, teardown |
 | `router/__tests__/guards.test.ts` | redirect anonymous с сохранением `redirect`, guestOnly, один restore на навигации, redirect на login при transient-сбое restore и повтор после восстановления, 401 после входа → login |
 | `views/__tests__/library-view.test.ts` | рендер строк и счётчик, debounce-поиск → URL, сортировка → URL, сентинел/спиннер догрузки, play через store, сквозное воспроизведение в следующую партию, локальное удаление, live-прогресс |
 | `views/__tests__/search-view.test.ts` | рендер результатов, empty/error/429-retry, постановка загрузок и статусы кнопок, upload (успех/ошибка/disabled), обновление библиотеки после upload |
