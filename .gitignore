@@ -1,0 +1,50 @@
+# --- Медиа-контент (сами папки оставляем) ---
+backend/downloads/*
+!backend/downloads/
+!backend/downloads/covers/
+!backend/downloads/thumbnails/
+backend/downloads/covers/*
+!backend/downloads/covers/.gitkeep
+backend/downloads/thumbnails/*
+!backend/downloads/thumbnails/.gitkeep
+
+# --- База данных ---
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+
+# --- FFmpeg binaries (тяжёлые, ставятся отдельно) ---
+backend/ffmpeg.exe
+backend/ffplay.exe
+backend/ffprobe.exe
+
+# --- Секреты ---
+backend/secret_key.txt
+tunnel.sh
+
+# --- Логи ---
+backend/logs/
+*.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# --- Frontend (Vue/Vite) ---
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+
+# --- Отладочные скрипты ---
+backend/_debug_*.py
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

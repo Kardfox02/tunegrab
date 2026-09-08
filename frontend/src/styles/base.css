@@ -1,0 +1,141 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--color-bg);
+}
+
+/* Фиксированный фон-фото под всем контентом.
+   mobile-first: на тач-устройствах — пре-повёрнутая копия изображения
+   (theme1-vertical.jpg, 90° сделаны на этапе сборки ассетов). Никаких
+   CSS-transform: компоситор Android ресемплирует повёрнутый слой при
+   микросдвигах вьюпорта — фон «дрожал» при скролле. Слой — простая fixed
+   заливка вьюпорта 100vw/100vh (константы большого вьюпорта: не ресайзится
+   и не сдвигается при скролле). Вместо background-attachment: fixed, который
+   iOS Safari игнорирует. Поверх фото — gradient-затемнение для контента. */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -1;
+  background:
+    linear-gradient(rgba(13, 15, 20, 0.38), rgba(13, 15, 20, 0.38)),
+    url('/theme1-vertical.jpg') center / cover no-repeat;
+  pointer-events: none;
+}
+
+@media (min-width: 768px) {
+  body::before {
+    background:
+      linear-gradient(rgba(13, 15, 20, 0.38), rgba(13, 15, 20, 0.38)),
+      url('/theme1.jpg') center / cover no-repeat;
+  }
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+  overflow-x: hidden;
+  color: var(--color-text);
+  /* Фона у body нет намеренно: непрозрачный фон body отрисовывается поверх
+     body::before (слой с z-index: -1) и прятал бы фоновое изображение.
+     Подложка на время загрузки — background на html. */
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: clamp(1.75rem, 5vw, var(--text-2xl));
+}
+
+h2 {
+  font-size: var(--text-xl);
+}
+
+h3 {
+  font-size: var(--text-lg);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+::selection {
+  color: var(--color-bg);
+  background: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
