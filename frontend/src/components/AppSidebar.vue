@@ -10,7 +10,7 @@ interface NavigationItem {
 const navigationItems: NavigationItem[] = [
   { name: 'library', label: 'Библиотека', icon: 'book' },
   { name: 'search', label: 'Поиск', icon: 'search' },
-  { name: 'settings', label: 'Профиль', icon: 'user' },
+  { name: 'profile', label: 'Профиль', icon: 'user' },
 ]
 </script>
 

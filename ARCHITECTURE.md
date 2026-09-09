@@ -21,8 +21,8 @@ Tunegrab — приложение для загрузки аудио из YouTub
 | Rate limiting, Origin-middleware (CSRF) | ✅ реализовано |
 | Модели Playlist/PlaylistTrack/ListenEvent/Like (+ миграции) | ✅ реализовано |
 | API событий `/events`, лайков `/likes` | ✅ реализовано |
+| API плейлистов `/playlists` (+ публичный `/playlists/shared/{token}`) | ✅ реализовано |
 | Админ-панель: `/admin/health`, очистка thumbnails, команды CLI | ✅ реализовано |
-| API плейлистов, `/shared/{token}` | ❌ не реализовано (модели готовы) |
 | Слой repositories/ | ❌ не реализован (доступ к данным напрямую в сервисах) |
 | `/health/details` | ❌ не реализован (есть только публичный `/health`) |
 | Frontend | ✅ реализован (см. ARCHITECTURE_FRONT.md) |
@@ -32,8 +32,9 @@ Tunegrab — приложение для загрузки аудио из YouTub
 | Endpoint | Доступ |
 |---|---|
 | `/auth`, `/health`, `/covers/...` | публичные (обложки не секретны) |
+| `/playlists/shared/{token}` | публичный (метаданные плейлиста без стриминга) |
 | `/tracks`, `/youtube` (включая thumbnail), `/stream/{id}` | только авторизованные (HttpOnly cookie) |
-| `/events`, `/likes`, `/admin` | только авторизованные (HttpOnly cookie) |
+| `/events`, `/likes`, `/playlists`, `/playlists/shared/{token}/subscribe` | только авторизованные (HttpOnly cookie) |
 
 - **Библиотека треков — общая**: оба пользователя видят все треки.
 
@@ -58,9 +59,9 @@ tunegrab/
 │   │   │   ├── base.py        # DeclarativeBase
 │   │   │   ├── user.py        # Пользователи (+token_version, created_at)
 │   │   │   ├── track.py       # Треки + status + progress, индексы (youtube_id уник., title, author, status+created_at)
-│   │   │   ├── playlist.py    # Плейлисты, PlaylistTrack (constraints) — API пока нет
+│   │   │   ├── playlist.py    # Плейлисты, PlaylistTrack (constraints)
 │   │   │   └── event.py       # ListenEvent + Like
-│   │   ├── schemas/           # Pydantic-схемы: auth, tracks, youtube, events, likes, admin
+│   │   ├── schemas/           # Pydantic-схемы: auth, tracks, youtube, events, likes, playlists, admin
 │   │   ├── download/
 │   │   │   ├── manager.py     # DownloadManager: asyncio.Queue + 1 worker, cancel-реестр, progress-consumer
 │   │   │   └── states.py      # TrackStatus (7 статусов) + ALLOWED_TRANSITIONS
@@ -73,6 +74,7 @@ tunegrab/
 │   │   │   ├── thumbnail_service.py  # Прокси YouTube-превью с кэшем (downloads/thumbnails/)
 │   │   │   ├── event_service.py      # События прослушиваний, статистика (затухающий топ), история
 │   │   │   ├── like_service.py       # Лайки: список с пагинацией, ids, идемпотентные PUT/DELETE
+│   │   │   ├── playlist_service.py   # Плейлисты: CRUD, позиции (max+1, компактизация), reorder, share-токены
 │   │   │   └── admin_service.py      # Админ-панель: health с размерами хранилища, очистка thumbnails, команды CLI
 │   │   └── api/
 │   │       ├── auth.py       # /auth — register, login, logout, change-password, me
@@ -81,10 +83,11 @@ tunegrab/
 │   │       ├── stream.py     # /stream/{id} — GET + HEAD, Range-стриминг
 │   │       ├── events.py     # /events — POST, stats, history
 │   │       ├── likes.py      # /likes — список, ids, PUT, DELETE
+│   │       ├── playlists.py  # /playlists — CRUD, треки, order, share, публичный shared/{token}
 │   │       └── admin.py      # /admin — health, thumbnails/clear, commands (verify-storage, cleanup-orphans)
-│   ├── alembic/               # Миграции: 0001_initial_schema, 0002_active_downloads_index
+│   ├── alembic/               # Миграции: 0001_initial_schema, 0002_active_downloads_index, 0003_playlist_access
 │   ├── alembic.ini
-│   ├── tests/                 # ~59 smoke-тестов (pytest + httpx): auth, stream, tracks, upload, youtube, thumbnails, origin, events, likes, миграции
+│   ├── tests/                 # ~68 smoke-тестов (pytest + httpx): auth, stream, tracks, upload, youtube, thumbnails, origin, events, likes, playlists, миграции
 │   ├── downloads/             # Аудиофайлы (вне БД)
 │   │   ├── covers/            # Обложки (UUID-имена)
 │   │   └── thumbnails/        # Кэш проксированных превью
@@ -122,8 +125,9 @@ DI через `Depends` (`dependencies/auth.py`). Отдельный Repository-
   - `progress` (0–100, контракт ниже), `file_size`, created_at.
   - Индексы: youtube_id (уник.), title, author, **(status, created_at)** — для active-списка (миграция 0002).
   - Метаданные не редактируются после загрузки — endpoint'ов редактирования нет.
-- **Playlist** — id, user_id (FK CASCADE), name, `share_token` (UUID, nullable; NULL = приватный). *API не реализовано.*
-- **PlaylistTrack** — составной PK; UNIQUE(playlist_id, track_id), INDEX(playlist_id, position), ON DELETE CASCADE. *API не реализовано.*
+- **Playlist** — id, user_id (FK CASCADE, автор), name, `share_token` (UUID, nullable; NULL = приватный). Плейлисты — **соавторские**: доступ через `PlaylistAccess`, автор + подписчики могут редактировать содержимое.
+- **PlaylistTrack** — составной PK; UNIQUE(playlist_id, track_id), INDEX(playlist_id, position), ON DELETE CASCADE.
+- **PlaylistAccess** (миграция 0003) — составной PK (playlist_id, user_id), оба FK CASCADE, INDEX(user_id), created_at. Подписка пользователя на чужой плейлист.
 - **ListenEvent** — id, user_id, track_id, event_type (**play / skip / complete**), `fraction_played` (Float 0.0–1.0), created_at; INDEX(user_id, track_id).
 - **Like** — составной PK (user_id, track_id), created_at.
 
@@ -219,7 +223,23 @@ Endpoint не изменяет записи и не запускает загр�
 - Правила событий: `play` — при первом старте трека; `complete` — при ended, если фактически прослушанная доля ≥ 0.9; `skip` — при ручном переходе или ended ниже порога. **fraction_played считается по фактическому времени прослушивания** (накопление дельт timeupdate с отсечкой скачков перемотки > 2 с), а не по конечной позиции.
 - Статистика (`/events/me/stats`): счётчики play/skip/complete, суммарное время (SUM fraction × duration), **топ-3 трека** с listened_seconds (сумма fraction × duration по всем событиям трека, включая skip/complete — треки выбираются по play через `HAVING SUM(play_weight) > 0`). Период задаётся клиентом (`period_days`, 1–30). Ранжирование топа — по **«затухающему» счёту запусков**: каждый play весит `2^(−возраст_дней / 2)` (полураспад 2 дня, `created_at` и `julianday('now')` — в UTC) — недавние прослушивания поднимаются в топе быстрее старых рекордов; `play_count` и `listened_seconds` в ответе — сырые (невзвешенные).
 - Лайки: toggle на фронте (profile.store, оптимистичный с откатом); бэк — идемпотентные PUT/DELETE.
-- **Не реализовано**: API плейлистов, `/shared/{token}`, рекомендации (модели Playlist/PlaylistTrack в БД готовы).
+
+## Плейлисты
+
+- **`/playlists` — реализовано**, модель **соавторства**:
+  - **Матрица прав**: чтение и редактирование (rename, треки, порядок) — автор **и подписчики**; удаление плейлиста и share-операции — **только автор** (`PlaylistNotOwnedError` → **403**); отписка — только подписчик (автору своя — 403). Посторонний без подписки → 404 (маскировка существования).
+  - `GET /playlists` (свои + подписные, каждый с `owner_username` и `is_owner`), `POST /playlists {name ≤200}` → 201;
+  - `GET /playlists/{id}` (detail: треки по position ASC, `owner_username`, `is_owner`), `PATCH` (rename), `DELETE` → 204 (каскад: tracks + access);
+  - `POST /playlists/{id}/tracks {track_id}` → 201 + detail; дубль → 409; нет трека → 404; позиция = max+1;
+  - `DELETE /playlists/{id}/tracks/{track_id}` → 204 + компактизация позиций; нет связи → 404;
+  - `PUT /playlists/{id}/tracks/order {track_ids}` → 200; состав не совпал → **409**;
+  - `POST /playlists/{id}/share` → `{share_url}` (создание/ротация uuid4-токена; только автор), `DELETE .../share` → 204 (отзыв);
+  - `POST /playlists/shared/{token}/subscribe` (auth, идемпотентный) — **автоподписка**: вызывается SharedView при открытии ссылки залогиненным (GET не меняет состояние); автор открывает свою ссылку — no-op;
+  - `DELETE /playlists/{id}/access` (auth) — отписка; автору своя → 403; без подписки → 404;
+  - **`GET /playlists/shared/{token}`** — публичный (без cookie): `{name, owner_username, tracks}`; треки **без `audio_url`** — анонимный доступ к стримингу не предусмотрен. SPA-страница шаринга — `/shared/:token` (не проксируется Vite; API сознательно живёт внутри `/playlists`; dev-прокси `/playlists` имеет `bypass` на `Accept: text/html`, иначе перезагрузка страницы плейлиста отдаёт JSON FastAPI).
+- Дедупликация трека в плейлисте — UNIQUE-констрейнтом + `IntegrityError` → 409.
+- Синхронизация между пользователями: одна БД на сервере + `force`-перезагрузка списка/detail при входе на страницу.
+- Рекомендации — не реализовано (модели в БД готовы).
 
 ## Админ-панель
 
@@ -238,13 +258,13 @@ UI — маршрут `/admin` (см. ARCHITECTURE_FRONT.md), открывает
 ## Инфраструктура
 
 - **Dev/Prod**: dev — Vite dev-server (порт 8080) + proxy на FastAPI (порт 8000); production-режим включается env `TUNEGRAB_ENV=production` (влияет на `Secure` cookie и CORS), раздача собранного фронтенда отдельно не реализована. `ALLOWED_ORIGINS` из env.
-- **SQLite**: `journal_mode=WAL`, `busy_timeout`, **`foreign_keys=ON`**; миграции — Alembic (0001_initial_schema, 0002_active_downloads_index), не `create_all`.
+- **SQLite**: `journal_mode=WAL`, `busy_timeout`, **`foreign_keys=ON`**; миграции — Alembic (0001_initial_schema, 0002_active_downloads_index, 0003_playlist_access), не `create_all`.
 - **Health**: публичный `GET /health` → `{status, storage: ok|warn}` (проверка `downloads/` и `covers/`); расширенный `GET /admin/health` — только для авторизованных (раздел «Админ-панель»).
 - **Логирование**: файл + консоль; ошибки, ход загрузки, ключевые действия.
 - **Ошибки**: централизованные exception handlers — 404 (TrackNotFound/StreamNotFound), 409 (файл занят, дубликат), 416 (Range), 413 (upload), 422 (Pydantic/upload), 429 (rate limit).
 - **Списки**: `q` (≤200), `sort_by` (**enum-белый список**), `order` ∈ {asc, desc}, `limit` 1–100 (дефолт 50), `offset` ≥ 0.
 - **CLI**: `python -m app.cli cleanup-orphans [--dry-run]`, `verify-storage`.
-- **Тесты**: ~59 smoke-тестов (pytest + httpx) — auth lifecycle, Origin-middleware, stream (Range/416/HEAD/traversal), tracks (CRUD, 409), upload (валидация, дубликаты), youtube (search-моки, дедуп, active-список, state machine, ffmpeg), thumbnails, события, лайки, миграции. Не покрыты: rate limiting, `/health`.
+- **Тесты**: ~68 smoke-тестов (pytest + httpx) — auth lifecycle, Origin-middleware, stream (Range/416/HEAD/traversal), tracks (CRUD, 409), upload (валидация, дубликаты), youtube (search-моки, дедуп, active-список, state machine, ffmpeg), thumbnails, события, лайки, плейлисты (CRUD, reorder, share, изоляция пользователей), миграции. Не покрыты: rate limiting, `/health`.
 
 ## Масштабируемость (~10k треков)
 

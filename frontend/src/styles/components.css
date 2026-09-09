@@ -590,6 +590,19 @@
   transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
+/* Строки с drag-handle: слева от обложки появляется узкая колонка grip. */
+.track-row--draggable {
+  grid-template-columns: 1.125rem 3.5rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    'grip cover info actions'
+    'grip cover meta actions'
+    'error error error error';
+}
+
+.track-row__grip {
+  grid-area: grip;
+}
+
 /* Sticky hover на тач-устройствах: hover-подсветки действуют только там,
    где есть настоящий курсор (media-паттерн как у .track-row__cover-play). */
 @media (hover: hover) and (pointer: fine) {
@@ -862,6 +875,11 @@
   background: transparent;
 }
 
+.track-row__action--playlist {
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
 .track-row__action--like {
   color: var(--color-text-muted);
   background: transparent;
@@ -876,6 +894,11 @@
   .track-row__action--delete:hover:not(:disabled) {
     color: var(--color-danger);
     background: var(--color-danger-soft);
+  }
+
+  .track-row__action--playlist:hover:not(:disabled) {
+    color: var(--track-accent, var(--color-accent));
+    background: color-mix(in srgb, var(--track-accent, var(--color-accent)) 14%, transparent);
   }
 
   .track-row__action--like:hover:not(:disabled) {
@@ -939,6 +962,16 @@
       'cover info meta actions'
       'error error error error';
     padding: var(--space-3) var(--space-4);
+  }
+
+  /* Desktop-сетка для строк с drag-handle: grip остаётся слева от обложки
+     (без этого override базовый media-правило теряет область grip и элемент
+     авто-размещается в конец строки). */
+  .track-row--draggable {
+    grid-template-columns: 1.125rem 3.5rem minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'grip cover info meta actions'
+      'error error error error error';
   }
 
   .track-row__meta {
@@ -1406,3 +1439,606 @@
   color: var(--color-danger);
 }
 
+
+/* ── Плейлисты: плитки в кабинете ─────────────────────────────── */
+
+.playlist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--space-3);
+}
+
+.playlist-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+}
+
+.playlist-tile__open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 7.5rem;
+  padding: var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.playlist-tile--create {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  min-height: 7.5rem;
+  padding: var(--space-4);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-tile--create:hover {
+    background: var(--glass-surface-strong);
+    transform: translateY(-2px);
+  }
+}
+
+.playlist-tile--create:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.playlist-tile__plus {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  color: var(--color-text);
+  background: var(--glass-surface-strong);
+}
+
+.playlist-tile__plus svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.playlist-tile__icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  background: var(--glass-surface-strong);
+}
+
+.playlist-tile__icon svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.playlist-tile__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.playlist-tile__count {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.playlist-tile__owner {
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-tile__open:hover {
+    background: var(--glass-surface-strong);
+    transform: translateY(-2px);
+  }
+}
+
+.playlist-tile__open:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-tile--create:hover {
+    background: var(--glass-surface-strong);
+    transform: translateY(-2px);
+  }
+}
+
+.playlist-tile__delete {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  background: var(--glass-surface-strong);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.playlist-tile__delete svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-tile:hover .playlist-tile__delete {
+    opacity: 1;
+  }
+  .playlist-tile__delete:hover {
+    color: var(--color-danger);
+  }
+}
+
+@media (hover: none) {
+  .playlist-tile__delete {
+    opacity: 1;
+  }
+}
+
+.playlist-tile__delete:focus-visible {
+  opacity: 1;
+  outline: var(--focus-ring-width, 2px) solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Создание плейлиста ───────────────────────────────────────── */
+
+.playlist-create__form {
+  max-width: 32rem;
+}
+
+.playlist-create .settings-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* ── Страница плейлиста ───────────────────────────────────────── */
+
+.playlist-view__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.playlist-view__back {
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+  padding: 0;
+}
+
+.playlist-view__meta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.playlist-view__owner {
+  color: var(--color-accent);
+}
+
+.playlist-view__unsubscribe {
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+
+.playlist-view__header-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.playlist-view__share {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.playlist-view__share-url {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* ── Пикер треков ─────────────────────────────────────────────── */
+
+.playlist-view__add-track {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.playlist-view__add-track svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-view__add-track:hover {
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
+}
+
+.playlist-view__add-track:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.playlist-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-strong);
+}
+
+.playlist-picker__search {
+  min-height: var(--touch-target);
+}
+
+.playlist-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.playlist-picker__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 3.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-picker__item:hover {
+    background: var(--color-surface-hover, rgba(255, 255, 255, 0.08));
+  }
+}
+
+.playlist-picker__item:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.playlist-picker__cover {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.playlist-picker__cover--placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.playlist-picker__cover--placeholder svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.playlist-picker__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.playlist-picker__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.playlist-picker__author {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-picker__add-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.playlist-picker__empty,
+.playlist-picker__error {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.playlist-picker__error {
+  color: var(--color-danger);
+}
+
+/* ── Drag&drop строк плейлиста ────────────────────────────────── */
+
+.track-row__grip {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: var(--touch-target);
+  color: var(--color-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.track-row__grip svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.track-row--dragging {
+  opacity: 0.45;
+}
+
+.track-row--drop-target {
+  box-shadow: 0 -2px 0 0 var(--color-accent);
+}
+
+/* ── Публичная страница шаринга ───────────────────────────────── */
+
+.shared-view__owner {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.shared-view__tracks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shared-view__track {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface);
+}
+
+.shared-view__rank {
+  width: 1.5rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.shared-view__cover {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.shared-view__cover--placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.shared-view__cover--placeholder svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.shared-view__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.shared-view__title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-view__author {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-view__duration {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.shared-view__cta {
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* ── Поповер «Добавить в плейлист» (библиотека) ───────────────── */
+
+.playlist-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: var(--z-toast, 1000);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(22rem, calc(100vw - 2 * var(--space-4)));
+  max-height: min(28rem, 80vh);
+  padding: var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--shadow-lg, 0 8px 32px rgba(0, 0, 0, 0.4));
+}
+
+.playlist-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.playlist-popover__close {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.playlist-popover__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.playlist-popover__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.playlist-popover__icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.playlist-popover__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .playlist-popover__item:hover {
+    background: var(--color-surface-hover, rgba(255, 255, 255, 0.08));
+  }
+}
+
+.playlist-popover__item:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.playlist-popover__count {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.playlist-popover__empty {
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.playlist-popover__create {
+  justify-content: center;
+}

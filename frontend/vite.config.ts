@@ -24,6 +24,19 @@ export default defineConfig({
       '/covers': 'http://localhost:8000',
       '/events': 'http://localhost:8000',
       '/likes': 'http://localhost:8000',
+      // API и SPA-страницы живут на одном префиксе /playlists: axios шлёт
+      // Accept: application/json (проксируем), браузерная навигация —
+      // Accept: text/html (отдаём index.html, иначе перезагрузка страницы
+      // плейлиста упирается в FastAPI и показывает JSON 404).
+      '/playlists': {
+        target: 'http://localhost:8000',
+        bypass(req) {
+          if (req.headers.accept?.includes('text/html')) {
+            return '/index.html'
+          }
+          return undefined
+        },
+      },
       '/admin/health': 'http://localhost:8000',
       '/admin/thumbnails': 'http://localhost:8000',
       '/admin/commands': 'http://localhost:8000',

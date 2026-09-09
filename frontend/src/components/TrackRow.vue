@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import AppIcon from './AppIcon.vue'
 import DownloadProgress from './DownloadProgress.vue'
@@ -8,18 +8,26 @@ import { resolveCoverColor } from '@/services/cover-color.service'
 import { usePlayerStore } from '@/stores/player.store'
 import type { Track, TrackStatus } from '@/types/track'
 
-const props = defineProps<{
-  track: Track
-  isDeleting: boolean
-  deleteErrorMessage: string | null
-  activeDownload?: Track | null
-  isCurrent?: boolean
-  isPlaying?: boolean
-  isLiked?: boolean
-  isTogglingLike?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    track: Track
+    isDeleting: boolean
+    deleteErrorMessage: string | null
+    activeDownload?: Track | null
+    isCurrent?: boolean
+    isPlaying?: boolean
+    isLiked?: boolean
+    isTogglingLike?: boolean
+    draggable?: boolean
+    isDragging?: boolean
+    isDropTarget?: boolean
+    showAddToPlaylist?: boolean
+    removeIcon?: 'trash' | 'close'
+  }>(),
+  { removeIcon: 'trash' },
+)
 
-const emit = defineEmits<{ play: []; remove: []; toggleLike: [] }>()
+const emit = defineEmits<{ play: []; remove: []; toggleLike: []; addToPlaylist: []; dragStart: []; dragEnd: [] }>()
 
 const player = usePlayerStore()
 
@@ -95,6 +103,34 @@ function handleRowDoubleClick(): void {
   }
 }
 
+const rowElement = ref<HTMLElement | null>(null)
+
+// Pointer-based drag&drop: захват handle начинает перенос, отпускание кнопки —
+// завершает (родитель слушает document-level pointerup через событие dragEnd).
+function onHandlePointerDown(event: PointerEvent): void {
+  if (!props.draggable || !event.isPrimary) {
+    return
+  }
+  event.preventDefault()
+  emit('dragStart')
+}
+
+function onWindowPointerUp(): void {
+  if (props.draggable) {
+    emit('dragEnd')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('pointerup', onWindowPointerUp)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('pointerup', onWindowPointerUp)
+})
+
+defineExpose({ rowElement })
+
 const durationLabel = computed(() => {
   const duration = props.track.duration
   if (duration === null) {
@@ -109,15 +145,28 @@ const durationLabel = computed(() => {
 
 <template>
   <li
+    ref="rowElement"
     class="track-row"
     :class="{
       'track-row--playable': canStartPlayback,
       'track-row--current': isCurrent,
+      'track-row--draggable': draggable,
+      'track-row--dragging': isDragging,
+      'track-row--drop-target': isDropTarget,
     }"
     :style="{ '--track-accent': rowAccent, '--track-accent-eq': equalizerAccent ?? rowAccent }"
     @click="canStartPlayback && handleRowClick()"
     @dblclick="canStartPlayback && handleRowDoubleClick()"
   >
+    <span
+      v-if="draggable"
+      class="track-row__grip"
+      aria-hidden="true"
+      @pointerdown="onHandlePointerDown"
+    >
+      <AppIcon name="grip" />
+    </span>
+
     <div class="track-row__cover" aria-hidden="true">
       <img v-if="track.cover_url" :src="track.cover_url" alt="" loading="lazy" decoding="async">
       <svg v-else viewBox="0 0 24 24" fill="none">
@@ -177,6 +226,15 @@ const durationLabel = computed(() => {
 
     <div class="track-row__actions">
       <button
+        v-if="props.showAddToPlaylist"
+        class="track-row__action track-row__action--playlist"
+        type="button"
+        aria-label="Добавить в плейлист"
+        @click.stop="emit('addToPlaylist')"
+      >
+        <AppIcon name="playlist" class="track-row__action-icon" />
+      </button>
+      <button
         class="track-row__action track-row__action--like"
         :class="{ 'track-row__action--liked': props.isLiked }"
         type="button"
@@ -191,10 +249,10 @@ const durationLabel = computed(() => {
         class="track-row__action track-row__action--delete"
         type="button"
         :disabled="isDeleting"
-        :aria-label="`Удалить: ${track.title}`"
+        :aria-label="removeIcon === 'close' ? `Убрать из плейлиста: ${track.title}` : `Удалить: ${track.title}`"
         @click.stop="emit('remove')"
       >
-        <AppIcon name="trash" class="track-row__action-icon" />
+        <AppIcon :name="removeIcon" class="track-row__action-icon" />
       </button>
     </div>
 

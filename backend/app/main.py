@@ -12,6 +12,7 @@ from app.api.stream import router as stream_router
 from app.api.youtube import router as youtube_router
 from app.api.events import router as events_router
 from app.api.likes import router as likes_router
+from app.api.playlists import router as playlists_router
 from app.api.admin import router as admin_router
 from app.config import settings
 from app.database import dispose_database
@@ -24,6 +25,12 @@ from app.services.stream_service import (
     StreamTrackNotFoundError,
 )
 from app.services.track_service import TrackFileBusyError, TrackNotFoundError
+from app.services.playlist_service import (
+    PlaylistNotFoundError,
+    PlaylistNotOwnedError,
+    PlaylistOrderMismatchError,
+    TrackAlreadyInPlaylistError,
+)
 from app.services.upload_service import (
     DuplicateTrackError,
     UploadTooLargeError,
@@ -58,6 +65,7 @@ app.include_router(stream_router)
 app.include_router(youtube_router)
 app.include_router(events_router)
 app.include_router(likes_router)
+app.include_router(playlists_router)
 app.include_router(admin_router)
 
 
@@ -101,6 +109,32 @@ async def upload_too_large_handler(_request: Request, _error: UploadTooLargeErro
 @app.exception_handler(DuplicateTrackError)
 async def duplicate_track_handler(_request: Request, _error: DuplicateTrackError) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": "This track is already in the library"})
+
+
+@app.exception_handler(PlaylistNotFoundError)
+async def playlist_not_found_handler(_request: Request, _error: PlaylistNotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "Playlist not found"})
+
+
+@app.exception_handler(PlaylistNotOwnedError)
+async def playlist_not_owned_handler(_request: Request, _error: PlaylistNotOwnedError) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": "Only the playlist owner can do this"})
+
+
+@app.exception_handler(TrackAlreadyInPlaylistError)
+async def track_already_in_playlist_handler(
+    _request: Request,
+    _error: TrackAlreadyInPlaylistError,
+) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": "Track is already in the playlist"})
+
+
+@app.exception_handler(PlaylistOrderMismatchError)
+async def playlist_order_mismatch_handler(
+    _request: Request,
+    _error: PlaylistOrderMismatchError,
+) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": "track_ids do not match the playlist contents"})
 
 
 @app.get("/health", tags=["health"], summary="Check service health")

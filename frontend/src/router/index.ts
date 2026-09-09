@@ -30,9 +30,19 @@ const routes = [
         component: () => import('@/views/SearchView.vue'),
       },
       {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/ProfileView.vue'),
+      },
+      {
+        // Исторический путь кабинета — оставлен redirect для старых ссылок.
         path: 'settings',
-        name: 'settings',
-        component: () => import('@/views/SettingsView.vue'),
+        redirect: { name: 'profile' },
+      },
+      {
+        path: 'playlists/:id',
+        name: 'playlist',
+        component: () => import('@/views/PlaylistView.vue'),
       },
       {
         path: 'admin',
@@ -40,6 +50,14 @@ const routes = [
         component: () => import('@/views/AdminView.vue'),
       },
     ],
+  },
+  {
+    // Публичная страница шаринга. Не внутри AppShell: доступна без сессии.
+    // API живёт на /playlists/shared/{token} (проксируется), а этот путь —
+    // чисто SPA-навигация, поэтому конфликтов с proxy нет.
+    path: '/shared/:token',
+    name: 'shared',
+    component: () => import('@/views/SharedView.vue'),
   },
   {
     path: '/login',

@@ -8,7 +8,7 @@
 
 - **Библиотека** (`/library`) — общая коллекция треков;
 - **Поиск** (`/search`) — поиск YouTube, загрузки, локальный upload;
-- **Профиль** (`/settings`) — личный кабинет;
+- **Профиль** (`/profile`) — личный кабинет;
 - **Панель управления** (`/admin`) — аккаунт, состояние сервера, обслуживание.
 
 Реализованный функционал:
@@ -51,7 +51,7 @@
 ```text
 Vite :8080 (host: true, allowedHosts: [rknshit.com])
   └── proxy /auth, /tracks, /youtube, /stream, /covers, /events, /likes,
-          /admin/health, /admin/thumbnails, /admin/commands
+          /playlists, /admin/health, /admin/thumbnails, /admin/commands
           (админ-API — точные префиксы: широкое '/admin' перехватило бы
           GET-навигацию на /admin при перезагрузке страницы и дало 404)
           ↓
@@ -93,6 +93,7 @@ frontend/
     │   ├── youtube-api.ts           #   /youtube/*: поиск, загрузки, cancel, retry
     │   ├── events-api.ts            #   /events: запись события, stats
     │   ├── likes-api.ts             #   /likes: список, ids, PUT, DELETE
+    │   ├── playlists-api.ts         #   /playlists: CRUD, треки, order, share, shared
     │   ├── admin-api.ts             #   /admin: health, thumbnails/clear, команды CLI
     │   └── index.ts                 #   re-export публичного API-слоя
     ├── components/
@@ -102,8 +103,8 @@ frontend/
     │   ├── AppNotifications.vue     # тосты (TransitionGroup, aria-live, стекло)
     │   ├── AppIcon.vue              # inline-SVG-иконки по имени
     │   ├── PlayerBar.vue            # владелец <audio>, свайпы, seek/volume
-    │   ├── TrackList.vue            # <ul> из TrackRow
-    │   ├── TrackRow.vue             # строка трека: обложка, статус, удаление
+    │   ├── TrackList.vue            # <ul> из TrackRow (+ drag&drop-проброс)
+    │   ├── TrackRow.vue             # строка трека: обложка, статус, удаление, лайк, «в плейлист», drag-handle
     │   ├── SearchForm.vue           # форма поиска (defineModel, enterkeyhint)
     │   ├── StorageDonutChart.vue    # SVG-донат хранилища (stroke-dasharray, легенда)
     │   ├── YouTubeResultCard.vue    # карточка результата: превью, статус, кнопка
@@ -126,12 +127,15 @@ frontend/
     │   ├── RegisterView.vue
     │   ├── LibraryView.vue
     │   ├── SearchView.vue
-    │   ├── SettingsView.vue        # личный кабинет (см. §12)
+    │   ├── ProfileView.vue         # личный кабинет (бывш. SettingsView, см. §12)
+    │   ├── PlaylistView.vue        # страница плейлиста: пикер, DnD, share
+    │   ├── SharedView.vue          # публичная страница шаринга (/shared/:token)
     │   └── AdminView.vue           # панель управления (см. §12)
     ├── types/
     │   ├── api.ts                   # Paginated<T>
     │   ├── auth.ts                  # User, AuthResponse, payloads
     │   ├── errors.ts                # ApiError, isApiError, apiErrorFromAxios
+    │   ├── playlists.ts             # контракты плейлистов
     │   ├── track.ts                 # Track, статусы, сортировка
     │   ├── youtube.ts               # поиск/загрузка/active-контракты
     │   ├── events.ts                # события прослушиваний, статистика
@@ -181,8 +185,11 @@ views / components / composables
 |---|---|
 | `/library` | `LibraryView` |
 | `/search` | `SearchView` |
-| `/settings` | `SettingsView` |
+| `/profile` (redirect с `/settings`) | `ProfileView` |
+| `/playlists/:id` | `PlaylistView` |
 | `/admin` | `AdminView` |
+
+Публично (вне AppShell): `/shared/:token` → `SharedView`.
 
 `/` → redirect на `library`. Все views загружаются лениво (`() => import(...)`); `AppShell` — тоже отдельный чанк.
 
@@ -314,6 +321,18 @@ Media Session: `services/media-session.service.ts` оборачивает `navig
 - ответы валидируются (мусорный ответ → ошибка секции, а не падение рендера);
 - `auth.onSessionTeardown` — полный сброс.
 
+### `playlists.store`
+
+Состояние: `playlists` (плитки кабинета), `detail` (страница плейлиста по id), флаги загрузки/ошибок списка и detail.
+
+- `load(force?)` — список своих плейлистов, лениво один раз за сессию; `loadDetail(id, force)` — детальная страница (force при каждом входе — данные должны быть свежими);
+- `create(name)` → `POST /playlists` + тост + аппенд плитки; `rename`, `remove` (плитки и detail синхронизируются);
+- `addTrack(playlistId, trackId)` — ответ (detail) заменяет `detail`, `track_count` плитки обновляется; 409 → тост «уже в плейлисте»;
+- `removeTrack` — локальное удаление из detail + компактизация счётчика;
+- `reorder(playlistId, orderedTracks)` — **оптимистичный**: detail обновляется сразу, при ошибке `PUT .../order` — откат и тост;
+- `share(playlistId)` / `revokeShare(playlistId)` — `share_url` синхронно в плитке и detail;
+- `auth.onSessionTeardown` — полный сброс.
+
 ### `notifications.store`
 
 `push(message, type = 'info', duration = 5000)` — авто-dismiss через таймер; `dismiss(id)`, `clear()`. Типы: `info | success | warning | error`. Отрисовка — `AppNotifications` (глобально, вне RouterView), `aria-live="polite"` + `TransitionGroup`.
@@ -369,6 +388,20 @@ GET  /likes                                            → LikeListResponse (п�
 GET  /likes/ids                                        → { track_ids: number[] } (все id сразу)
 PUT    /likes/{track_id}                               → 200|201 Like
 DELETE /likes/{track_id}                               → 204
+
+GET    /playlists                                      → PlaylistListResponse (свои + подписные, owner_username/is_owner)
+POST   /playlists {name}                               → 201 PlaylistSummary
+GET    /playlists/{id}                                 → PlaylistDetail (items по position ASC, owner_username, is_owner)
+PATCH  /playlists/{id} {name}                          → 200 PlaylistDetail
+DELETE /playlists/{id}                                 → 204 (только автор, иначе 403)
+POST   /playlists/{id}/tracks {track_id}               → 201 PlaylistDetail (дубль → 409)
+DELETE /playlists/{id}/tracks/{track_id}               → 204
+PUT    /playlists/{id}/tracks/order {track_ids}        → 200 PlaylistDetail (mismatch → 409)
+POST   /playlists/{id}/share                           → 200 PlaylistSummary (только автор)
+DELETE /playlists/{id}/share                           → 204 (только автор)
+DELETE /playlists/{id}/access                          → 204 (отписка; автору своей → 403)
+GET    /playlists/shared/{token}                       → SharedPlaylist (публичный, без audio_url)
+POST   /playlists/shared/{token}/subscribe             → 200 {playlist_id} (автоподписка, идемпотентно)
 
 GET  /admin/health                                     → AdminHealth (track_count, ffmpeg, диск, размеры хранилища)
 POST /admin/thumbnails/clear                           → { deleted_files, freed_bytes }
@@ -495,8 +528,27 @@ Layout (`styles/layout.css`):
 
 Форматирование байтов (Б/КБ/МБ/ГБ/ТБ) — локальные хелперы в `AdminView` и `StorageDonutChart`.
 
-- `SettingsView` — личный кабинет: приветствие «Привет, {username}», секции Статистика → Плейлисты (заглушка «Появится скоро») → Любимое (с дозагрузкой при скролле), кнопка «Выйти» в шапке. Смена пароля живёт в панели управления `/admin` (см. выше).
+- `ProfileView` (маршрут `/profile`, историческое имя view-файла и CSS-классов `settings-*` сохранено; `/settings` → redirect) — личный кабинет: приветствие «Привет, {username}», секции Статистика → Плейлисты (плиточная сетка) → Любимое (с дозагрузкой при скролле), кнопка «Выйти» в шапке. Смена пароля живёт в панели управления `/admin` (см. выше).
   - **Статистика**: переключатель периода (24 часа / 7 дней / 30 дней — сегмент-кнопки, сменa → немедленный `refreshStats(days)`) + **автообновление каждые 30 с** через `createPolling` (`runOnStart: false`, чтобы не дублировать запрос `reloadProfile()` при маунте; в фоновой вкладке интервал больше, при возврате на вкладку — мгновенный тик). Заголовок секции отражает выбранный период; топ-3 ранжируется на бэке с затуханием по свежести (см. ARCHITECTURE.md). Общее время прослушивания показывается только в счётчиках сверху; у треков в топе время не выводится — только место, обложка, название и автор.
+  - **Плейлисты**: плиточная сетка (`.playlist-grid`), первая плитка — «Создать плейлист» (dashed-бордер, большой «+») → немедленное `POST /playlists` с именем-плейсхолдером «Новый плейлист» и переход на страницу плейлиста (отдельного экрана создания нет — пользователь переименовывает на месте); плитка плейлиста — имя, автор («от {username}`, только для подписных, accent-цвет), счётчик треков со склонением (`utils/plural.formatTrackCount`), корзина удаления — **только на своей плитке** (hover на desktop, всегда видна на тач, `confirm()`).
+
+### Плейлисты (маршруты, store, страницы)
+
+- **Модель соавторства**: плейлист доступен автору и подписчикам (подписка создаётся автоподпиской по share-ссылке). Редактирование (переименование, добавление/удаление треков, порядок) — оба; share-блок — только автор; отписка — только соавтор (кнопка «Отписаться» + `confirm()`, после 204 — редирект в профиль). Список в кабинете грузится `force` при каждом входе — изменения соавтора видны при следующем открытии.
+- **Маршруты**: `/playlists/:id` (`PlaylistView`) — защищённый, внутри AppShell; `/shared/:token` (`SharedView`) — публичный, вне AppShell (API при этом живёт на `/playlists/shared/{token}`, который проксируется — сам путь `/shared/...` чисто SPA-навигация, конфликта с Vite proxy нет). Прокси `/playlists` в dev имеет `bypass` на `Accept: text/html` (навигация отдаёт `index.html`, иначе перезагрузка страницы плейлиста показывает JSON-ответ FastAPI).
+- **`playlists.store`**: список плиток (`load(force)`, force при входе в кабинет и retry), detail по id (`loadDetail(id, force)`), CRUD (`create` с тостом, `rename`, `remove`), треки (`addTrack` возвращает detail + тост об успехе, `removeTrack` локально + компактизация счётчика), **оптимистичный `reorder`** (порядок применяется сразу, откат + тост при ошибке), share (`share` → новый `share_url`, `revokeShare`), подписки (`subscribeByToken` — тихий идемпотентный POST, возвращает id или null; `unsubscribe` — 204 + локальное удаление плитки + тост), teardown-сброс.
+- **`PlaylistView`**:
+  - заголовок (+ «от {author}» для соавтора) + кнопка «Назад»; «Переименовать» — у обоих; «Отписаться» (danger-кнопка) — только у соавтора;
+  - share-блок (`v-if="isOwner"`): создание/копирование (`navigator.clipboard.writeText` напрямую, без `window.clipboard`-подтверждений; fallback — `prompt()` при отказе clipboard API)/отзыв ссылки;
+  - треки через `TrackList` (play = `player.playOrToggle(track, items)` — очередь = плейлист); удаление трека из плейлиста — **крестик** (`remove-icon="close"` в `TrackRow`), трек остаётся в библиотеке;
+  - **мок-строка «Добавить трек» первой** в секции треков; раскрывает **пикер**: поиск (локальный debounce 350 мс + AbortGroup), партии по 50 с догрузкой при скролле (`useInfiniteScroll` + сентинел внутри пикера), уже добавленные треки **скрываются** (клиентский фильтр + дедупликация партий по id — offset-пагинация даёт дубли), клик → `addTrack` (тост «Трек добавлен в плейлист»; 409 гонки гасится тостом бэка). Состояние пикера локальное в view, запросы идут напрямую через `tracks-api` (library.store не трогается);
+  - **drag&drop reorder**: pointer events по drag-handle (`grip`) **слева от обложки** (отдельная grid-колонка `track-row--draggable` в `TrackRow`, включая desktop-media-override), `pointerdown` на handle → `dragStart`, `pointerenter` строк → `dropIndex`, document `pointerup` → `dragEnd`; **автоскролл**: во время drag document-`pointermove` + rAF-цикл, курсор в зоне ≤80px от верх/низ вьюпорта прокручивает страницу (скорость растёт у края); drop → оптимистичный `reorder` + `PUT /tracks/order`.
+- **Добавление из библиотеки и «Любимого»**: кнопка «в плейлист» в `TrackRow` (`addToPlaylist`, prop `showAddToPlaylist`) → модальный поповер `AddToPlaylistPopover` со списком плейлистов (иконка, имя, счётчик).
+- **`SharedView`** (`/shared/:token`): загрузка по токену (404/отзыв → ErrorState с retry), список треков (номер, обложка, title/author, длительность) **без кнопок воспроизведения**; аноним → CTA «Войти» с `redirect` обратно на share-ссылку; залогиненный → тихая **автоподписка** (`POST /subscribe`, дожидается `auth.initialized`, чтобы не подписаться под чужой сессией) → карточка «Плейлист добавлен в ваши плейлисты» + кнопка «Открыть плейлист» → `/playlists/{id}`.
+
+### Иконки
+
+`AppIcon` дополнен: `playlist`, `plus`, `grip` (drag-handle), `close` (крестик удаления из плейлиста).
 - Service worker не реализован: офлайн-режима нет, `manifest.webmanifest` даёт только установку иконки/темы.
 - В `vite.config.ts` dev-порт `8080` (историческая документация упоминала `5173`).
 - `E2E`-сценариев нет: покрытие — только модульные тесты.
@@ -516,7 +568,7 @@ Layout (`styles/layout.css`):
 | `views/__tests__/library-view.test.ts` | рендер строк и счётчик, debounce-поиск → URL, сортировка → URL, сентинел/спиннер догрузки, play через store, сквозное воспроизведение в следующую партию, локальное удаление, live-прогресс |
 | `views/__tests__/search-view.test.ts` | рендер результатов, empty/error/429-retry, постановка загрузок и статусы кнопок, upload (успех/ошибка/disabled), обновление библиотеки после upload |
 | `views/__tests__/auth-views.test.ts` | login с `redirect`, register |
-| `views/__tests__/settings-view.test.ts` | кабинет: статистика и переключатель периода, секция «Любимое», заглушка плейлистов, logout |
+| `views/__tests__/profile-view.test.ts` | кабинет: статистика и переключатель периода, секция «Любимое», плитки плейлистов, logout |
 | `components/__tests__/player-bar.test.ts` | связь audio events ↔ store, исполнение команд, инпуты seek/volume, восстановление стрима после `error` вместо финальной ошибки |
 | `components/__tests__/app-shell.test.ts` | protected shell: навигация + пользователь |
 | `composables/__tests__/use-debounced-search.test.ts` | debounce, minLength, abort, ошибки |
