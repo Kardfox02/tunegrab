@@ -6,9 +6,11 @@ import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import TrackList from '@/components/TrackList.vue'
+import AddToPlaylistPopover from '@/components/AddToPlaylistPopover.vue'
 import { useDownloadsStore } from '@/stores/downloads.store'
 import { useLibraryStore } from '@/stores/library.store'
 import { usePlayerStore } from '@/stores/player.store'
+import { usePlaylistsStore } from '@/stores/playlists.store'
 import { useProfileStore } from '@/stores/profile.store'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import type { Track, TrackSortField, TrackSortOrder } from '@/types/track'
@@ -19,6 +21,7 @@ const library = useLibraryStore()
 const player = usePlayerStore()
 const downloads = useDownloadsStore()
 const profile = useProfileStore()
+const playlists = usePlaylistsStore()
 
 // Сердечкам в строках нужен набор лайков; профиль грузится лениво один раз.
 void profile.loadProfile()
@@ -116,6 +119,21 @@ function remove(track: Track): void {
 
 function toggleLike(track: Track): void {
   void profile.toggleLike(track)
+}
+
+// ── Поповер «Добавить в плейлист» ───────────────────────────────────────────
+
+const addToPlaylistTrack = ref<Track | null>(null)
+
+void playlists.load()
+
+async function choosePlaylist(playlistId: number): Promise<void> {
+  const track = addToPlaylistTrack.value
+  if (!track) {
+    return
+  }
+  addToPlaylistTrack.value = null
+  await playlists.addTrack(playlistId, track.id)
 }
 
 function loadMore(): void {
@@ -218,9 +236,18 @@ const counterLabel = computed(() => {
         :is-playing="player.isPlaying"
         :liked-track-ids="profile.likedTrackIds"
         :toggling-like-ids="profile.togglingIds"
+        :show-add-to-playlist="true"
         @play="play"
         @remove="remove"
         @toggle-like="toggleLike"
+        @add-to-playlist="(track) => (addToPlaylistTrack = track)"
+      />
+
+      <AddToPlaylistPopover
+        v-if="addToPlaylistTrack"
+        :track="addToPlaylistTrack"
+        @close="addToPlaylistTrack = null"
+        @add="choosePlaylist"
       />
 
       <div

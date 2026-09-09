@@ -11,15 +11,28 @@ defineProps<{
   isPlaying?: boolean
   likedTrackIds?: Set<number>
   togglingLikeIds?: Set<number>
+  showAddToPlaylist?: boolean
+  removeIcon?: 'trash' | 'close'
+  draggable?: boolean
+  dragIndex?: number | null
+  dropIndex?: number | null
 }>()
 
-const emit = defineEmits<{ play: [track: Track]; remove: [track: Track]; toggleLike: [track: Track] }>()
+const emit = defineEmits<{
+  play: [track: Track, index: number]
+  remove: [track: Track, index: number]
+  toggleLike: [track: Track]
+  addToPlaylist: [track: Track]
+  dragStart: [index: number]
+  dragOverRow: [index: number]
+  dragEnd: []
+}>()
 </script>
 
 <template>
   <ul class="track-list">
     <TrackRow
-      v-for="track in tracks"
+      v-for="(track, index) in tracks"
       :key="track.id"
       :track="track"
       :is-deleting="deletingIds.includes(track.id)"
@@ -29,9 +42,18 @@ const emit = defineEmits<{ play: [track: Track]; remove: [track: Track]; toggleL
       :is-playing="isPlaying"
       :is-liked="likedTrackIds?.has(track.id) ?? false"
       :is-toggling-like="togglingLikeIds?.has(track.id) ?? false"
-      @play="emit('play', track)"
-      @remove="emit('remove', track)"
+      :show-add-to-playlist="showAddToPlaylist"
+      :remove-icon="removeIcon"
+      :draggable="draggable"
+      :is-dragging="dragIndex === index"
+      :is-drop-target="dropIndex === index && dragIndex !== index"
+      @play="emit('play', track, index)"
+      @remove="emit('remove', track, index)"
       @toggle-like="emit('toggleLike', track)"
+      @add-to-playlist="emit('addToPlaylist', track)"
+      @drag-start="emit('dragStart', index)"
+      @pointerenter="dragIndex !== null && emit('dragOverRow', index)"
+      @drag-end="emit('dragEnd')"
     />
   </ul>
 </template>

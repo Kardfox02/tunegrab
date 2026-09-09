@@ -1,6 +1,6 @@
 <script setup lang="ts">
 withDefaults(
-  defineProps<{ name: 'book' | 'search' | 'gear' | 'panel' | 'play' | 'pause' | 'volume' | 'trash' | 'skip-prev' | 'skip-next' | 'heart' | 'user'; filled?: boolean }>(),
+  defineProps<{ name: 'book' | 'search' | 'gear' | 'panel' | 'play' | 'pause' | 'volume' | 'trash' | 'skip-prev' | 'skip-next' | 'heart' | 'user' | 'playlist' | 'plus' | 'grip' | 'close'; filled?: boolean }>(),
   { filled: false },
 )
 </script>
@@ -57,6 +57,29 @@ withDefaults(
     <template v-else-if="name === 'user'">
       <circle cx="12" cy="8" r="4" />
       <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+    </template>
+    <template v-else-if="name === 'playlist'">
+      <path d="M9 4v16" />
+      <circle cx="17" cy="18" r="2.5" />
+      <path d="M9 18h5.5" />
+      <path d="M13 6h7" />
+      <path d="M13 10h7" />
+    </template>
+    <template v-else-if="name === 'plus'">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </template>
+    <template v-else-if="name === 'grip'">
+      <circle cx="9" cy="6" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="6" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none" />
+    </template>
+    <template v-else-if="name === 'close'">
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
     </template>
     <template v-else-if="name === 'trash'">
       <path d="M4 7h16" />

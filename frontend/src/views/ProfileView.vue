@@ -5,16 +5,23 @@ import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import TrackList from '@/components/TrackList.vue'
+import AddToPlaylistPopover from '@/components/AddToPlaylistPopover.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import { createPolling } from '@/composables/usePolling'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlayerStore } from '@/stores/player.store'
+import { usePlaylistsStore } from '@/stores/playlists.store'
 import { useProfileStore } from '@/stores/profile.store'
+import { formatTrackCount } from '@/utils/plural'
 import type { Track } from '@/types/track'
+import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
 const player = usePlayerStore()
 const profile = useProfileStore()
+const playlists = usePlaylistsStore()
+const router = useRouter()
 
 // Период статистики: 24 часа / 7 дней / 30 дней. Выбранный период держим
 // локально — он влияет и на ручное обновление, и на поллинг.
@@ -46,8 +53,11 @@ const statsPolling = createPolling(
 )
 
 onMounted(() => {
-  // Каждый переход в профиль — свежая статистика и лайки.
+  // Каждый переход в профиль — свежая статистика и лайки. Плейлисты — force:
+  // так соавтор видит изменения другого пользователя при входе (синхронизация
+  // «при входе»).
   void profile.reloadProfile()
+  void playlists.load(true)
   statsPolling.start()
 })
 
@@ -86,6 +96,45 @@ function playFromLikes(track: Track): void {
 
 function toggleLike(track: Track): void {
   void profile.toggleLike(track)
+}
+
+// Кнопка удаления (корзина) в «Любимом» = снятие лайка тем же toggle-методом.
+function removeFromLikes(track: Track): void {
+  if (profile.likedTrackIds.has(track.id)) {
+    void profile.toggleLike(track)
+  }
+}
+
+// ── Поповер «Добавить в плейлист» (секция «Любимое») ────────────────────────
+
+const addToPlaylistTrack = ref<Track | null>(null)
+
+async function choosePlaylist(playlistId: number): Promise<void> {
+  const track = addToPlaylistTrack.value
+  if (!track) {
+    return
+  }
+  addToPlaylistTrack.value = null
+  await playlists.addTrack(playlistId, track.id)
+}
+
+function openPlaylist(id: number): void {
+  void router.push({ name: 'playlist', params: { id: String(id) } })
+}
+
+// Создание без отдельного экрана: сразу плейлист с плейсхолдерным именем,
+// пользователь переименовывает на его странице.
+async function createPlaylist(): Promise<void> {
+  const created = await playlists.create('Новый плейлист')
+  if (created) {
+    await router.push({ name: 'playlist', params: { id: String(created.id) } })
+  }
+}
+
+async function confirmDeletePlaylist(id: number, name: string): Promise<void> {
+  if (window.confirm(`Удалить плейлист «${name}»?`)) {
+    await playlists.remove(id)
+  }
 }
 
 // Пагинация «Любимого» — как в библиотеке: сентинел + серверные партии.
@@ -181,9 +230,65 @@ useInfiniteScroll({
       </template>
     </section>
 
-    <section class="card settings-section settings-section--placeholder" aria-labelledby="settings-playlists">
+    <section class="card settings-section" aria-labelledby="settings-playlists">
       <h2 id="settings-playlists" class="settings-section__title">Плейлисты</h2>
-      <p class="settings-section__empty">Появится скоро</p>
+
+      <LoadingState v-if="playlists.isLoading && !playlists.isLoaded" message="Загружаем плейлисты…" />
+
+      <ErrorState
+        v-else-if="playlists.listError"
+        :message="playlists.listError"
+        @retry="playlists.load(true)"
+      />
+
+      <template v-else>
+        <div class="playlist-grid">
+          <button
+            class="playlist-tile playlist-tile--create"
+            type="button"
+            aria-label="Создать плейлист"
+            @click="createPlaylist"
+          >
+            <span class="playlist-tile__plus" aria-hidden="true">
+              <AppIcon name="plus" />
+            </span>
+          </button>
+
+          <div
+            v-for="playlist in playlists.playlists"
+            :key="playlist.id"
+            class="playlist-tile"
+          >
+            <button
+              type="button"
+              class="playlist-tile__open"
+              @click="openPlaylist(playlist.id)"
+            >
+              <span class="playlist-tile__icon" aria-hidden="true">
+                <AppIcon name="playlist" />
+              </span>
+              <span class="playlist-tile__name">{{ playlist.name }}</span>
+              <span v-if="!playlist.is_owner" class="playlist-tile__owner">
+                от {{ playlist.owner_username }}
+              </span>
+              <span class="playlist-tile__count">{{ formatTrackCount(playlist.track_count) }}</span>
+            </button>
+            <button
+              v-if="playlist.is_owner"
+              type="button"
+              class="playlist-tile__delete"
+              :aria-label="`Удалить плейлист «${playlist.name}»`"
+              @click="confirmDeletePlaylist(playlist.id, playlist.name)"
+            >
+              <AppIcon name="trash" />
+            </button>
+          </div>
+        </div>
+
+        <p v-if="!playlists.hasPlaylists" class="settings-section__empty">
+          Соберите треки в подборки — создайте первый плейлист.
+        </p>
+      </template>
     </section>
 
     <section class="card settings-section" aria-labelledby="settings-likes">
@@ -209,8 +314,11 @@ useInfiniteScroll({
           :is-playing="player.isPlaying"
           :liked-track-ids="profile.likedTrackIds"
           :toggling-like-ids="profile.togglingIds"
+          :show-add-to-playlist="true"
           @play="playFromLikes"
+          @remove="removeFromLikes"
           @toggle-like="toggleLike"
+          @add-to-playlist="(track) => (addToPlaylistTrack = track)"
         />
 
         <div
@@ -231,5 +339,12 @@ useInfiniteScroll({
         message="Отмечайте треки сердечком в библиотеке — они появятся здесь."
       />
     </section>
+
+    <AddToPlaylistPopover
+      v-if="addToPlaylistTrack"
+      :track="addToPlaylistTrack"
+      @close="addToPlaylistTrack = null"
+      @add="choosePlaylist"
+    />
   </div>
 </template>

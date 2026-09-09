@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fetchLikes, fetchLikedTrackIds, removeLike } from '@/api/likes-api'
 import { fetchListeningStats } from '@/api/events-api'
-import SettingsView from '../SettingsView.vue'
+import { fetchPlaylists } from '@/api/playlists-api'
+import ProfileView from '../ProfileView.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlayerStore } from '@/stores/player.store'
 import type { Track } from '@/types/track'
@@ -21,10 +22,24 @@ vi.mock('@/api/likes-api', () => ({
   removeLike: vi.fn(),
 }))
 
+vi.mock('@/api/playlists-api', () => ({
+  fetchPlaylists: vi.fn(),
+  createPlaylist: vi.fn(),
+  fetchPlaylist: vi.fn(),
+  renamePlaylist: vi.fn(),
+  deletePlaylist: vi.fn(),
+  addPlaylistTrack: vi.fn(),
+  removePlaylistTrack: vi.fn(),
+  reorderPlaylistTracks: vi.fn(),
+  createShareLink: vi.fn(),
+  revokeShareLink: vi.fn(),
+}))
+
 const mockedStats = vi.mocked(fetchListeningStats)
 const mockedFetchLikes = vi.mocked(fetchLikes)
 const mockedFetchLikedTrackIds = vi.mocked(fetchLikedTrackIds)
 const mockedRemove = vi.mocked(removeLike)
+const mockedFetchPlaylists = vi.mocked(fetchPlaylists)
 
 function createTrack(overrides: Partial<Track> = {}): Track {
   return {
@@ -64,14 +79,14 @@ async function mountView() {
   auth.currentUser = { id: 1, username: 'alice' }
   auth.initialized = true
 
-  const wrapper = mount(SettingsView, { global: { plugins: [pinia] } })
+  const wrapper = mount(ProfileView, { global: { plugins: [pinia] } })
   await flushPromises()
   const player = usePlayerStore()
 
   return { wrapper, auth, player }
 }
 
-describe('SettingsView (личный кабинет)', () => {
+describe('ProfileView (личный кабинет)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockedStats.mockResolvedValue(statsFixture())
@@ -82,6 +97,7 @@ describe('SettingsView (личный кабинет)', () => {
       limit: 50,
       offset: 0,
     })
+    mockedFetchPlaylists.mockResolvedValue({ items: [], total: 0 })
   })
 
   afterEach(() => {
@@ -124,7 +140,7 @@ describe('SettingsView (личный кабинет)', () => {
     auth.currentUser = { id: 1, username: 'alice' }
     auth.initialized = true
 
-    const wrapper = mount(SettingsView, { global: { plugins: [pinia] } })
+    const wrapper = mount(ProfileView, { global: { plugins: [pinia] } })
     // Даём микротаскам выполниться: isStatsLoading/isLoadingLikes стали true,
     // но промисы ещё не разрешены.
     await flushPromises()
@@ -188,11 +204,11 @@ describe('SettingsView (личный кабинет)', () => {
     expect(wrapper.find('.stats-top__time-unit').exists()).toBe(false)
   })
 
-  it('shows the playlists placeholder', async () => {
+  it('shows the playlists section with a create tile', async () => {
     const { wrapper } = await mountView()
 
     expect(wrapper.text()).toContain('Плейлисты')
-    expect(wrapper.text()).toContain('Появится скоро')
+    expect(wrapper.find('.playlist-tile--create').exists()).toBe(true)
   })
 
   it('shows an empty likes state when nothing is liked', async () => {

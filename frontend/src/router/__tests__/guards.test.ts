@@ -94,7 +94,7 @@ describe('router guards', () => {
     const router = createAppRouter(pinia, createMemoryHistory())
 
     await router.push('/library')
-    await router.push('/settings')
+    await router.push('/profile')
 
     expect(restoreCount).toBe(1)
   })

@@ -16,3 +16,16 @@ export {
   retryDownload,
 } from './youtube-api'
 export { deleteTrack, listTracks } from './tracks-api'
+export {
+  addPlaylistTrack,
+  createPlaylist,
+  createShareLink,
+  deletePlaylist,
+  fetchPlaylist,
+  fetchPlaylists,
+  fetchSharedPlaylist,
+  removePlaylistTrack,
+  renamePlaylist,
+  reorderPlaylistTracks,
+  revokeShareLink,
+} from './playlists-api'
