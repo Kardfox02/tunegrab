@@ -21,6 +21,7 @@ Tunegrab — приложение для загрузки аудио из YouTub
 | Rate limiting, Origin-middleware (CSRF) | ✅ реализовано |
 | Модели Playlist/PlaylistTrack/ListenEvent/Like (+ миграции) | ✅ реализовано |
 | API событий `/events`, лайков `/likes` | ✅ реализовано |
+| Админ-панель: `/admin/health`, очистка thumbnails, команды CLI | ✅ реализовано |
 | API плейлистов, `/shared/{token}` | ❌ не реализовано (модели готовы) |
 | Слой repositories/ | ❌ не реализован (доступ к данным напрямую в сервисах) |
 | `/health/details` | ❌ не реализован (есть только публичный `/health`) |
@@ -32,7 +33,7 @@ Tunegrab — приложение для загрузки аудио из YouTub
 |---|---|
 | `/auth`, `/health`, `/covers/...` | публичные (обложки не секретны) |
 | `/tracks`, `/youtube` (включая thumbnail), `/stream/{id}` | только авторизованные (HttpOnly cookie) |
-| `/events`, `/likes` | только авторизованные (HttpOnly cookie) |
+| `/events`, `/likes`, `/admin` | только авторизованные (HttpOnly cookie) |
 
 - **Библиотека треков — общая**: оба пользователя видят все треки.
 
@@ -59,7 +60,7 @@ tunegrab/
 │   │   │   ├── track.py       # Треки + status + progress, индексы (youtube_id уник., title, author, status+created_at)
 │   │   │   ├── playlist.py    # Плейлисты, PlaylistTrack (constraints) — API пока нет
 │   │   │   └── event.py       # ListenEvent + Like
-│   │   ├── schemas/           # Pydantic-схемы: auth, tracks, youtube, events, likes
+│   │   ├── schemas/           # Pydantic-схемы: auth, tracks, youtube, events, likes, admin
 │   │   ├── download/
 │   │   │   ├── manager.py     # DownloadManager: asyncio.Queue + 1 worker, cancel-реестр, progress-consumer
 │   │   │   └── states.py      # TrackStatus (7 статусов) + ALLOWED_TRANSITIONS
@@ -71,14 +72,16 @@ tunegrab/
 │   │   │   ├── upload_service.py     # Локальные mp3: валидация, метаданные (mutagen), обложка
 │   │   │   ├── thumbnail_service.py  # Прокси YouTube-превью с кэшем (downloads/thumbnails/)
 │   │   │   ├── event_service.py      # События прослушиваний, статистика (затухающий топ), история
-│   │   │   └── like_service.py       # Лайки: список с пагинацией, ids, идемпотентные PUT/DELETE
+│   │   │   ├── like_service.py       # Лайки: список с пагинацией, ids, идемпотентные PUT/DELETE
+│   │   │   └── admin_service.py      # Админ-панель: health с размерами хранилища, очистка thumbnails, команды CLI
 │   │   └── api/
 │   │       ├── auth.py       # /auth — register, login, logout, change-password, me
 │   │       ├── tracks.py     # /tracks — список (q/sort/пагинация), DELETE, POST /upload
 │   │       ├── youtube.py    # /youtube — search, download, downloads/active, status, cancel, retry, thumbnail
 │   │       ├── stream.py     # /stream/{id} — GET + HEAD, Range-стриминг
 │   │       ├── events.py     # /events — POST, stats, history
-│   │       └── likes.py      # /likes — список, ids, PUT, DELETE
+│   │       ├── likes.py      # /likes — список, ids, PUT, DELETE
+│   │       └── admin.py      # /admin — health, thumbnails/clear, commands (verify-storage, cleanup-orphans)
 │   ├── alembic/               # Миграции: 0001_initial_schema, 0002_active_downloads_index
 │   ├── alembic.ini
 │   ├── tests/                 # ~59 smoke-тестов (pytest + httpx): auth, stream, tracks, upload, youtube, thumbnails, origin, events, likes, миграции
@@ -218,11 +221,25 @@ Endpoint не изменяет записи и не запускает загр�
 - Лайки: toggle на фронте (profile.store, оптимистичный с откатом); бэк — идемпотентные PUT/DELETE.
 - **Не реализовано**: API плейлистов, `/shared/{token}`, рекомендации (модели Playlist/PlaylistTrack в БД готовы).
 
+## Админ-панель
+
+UI — маршрут `/admin` (см. ARCHITECTURE_FRONT.md), открывается по клику на никнейм в шапке. Все endpoint'ы требуют авторизации (cookie); POST подпадает под Origin-middleware (CSRF).
+
+| Endpoint | Ответ |
+|---|---|
+| `GET /admin/health` | `{ status, storage_ok, ffmpeg_found, track_count, disk_total_bytes, disk_free_bytes, storage: { audio_bytes, covers_bytes, thumbnails_bytes, total_bytes } }` — размеры считаются по директориям (корень `downloads/` минус `covers/` и `thumbnails/` = аудио), обход файлов и `shutil.disk_usage` (том `downloads/`) — в `asyncio.to_thread` |
+| `POST /admin/thumbnails/clear` | `{ deleted_files, freed_bytes }` — удаляет все файлы кэша `downloads/thumbnails/` (превью перекачаются по требованию) |
+| `POST /admin/commands/verify-storage` | `{ ok, errors: [...] }` — логика CLI `verify-storage` (директории, файлы треков, ffmpeg) |
+| `POST /admin/commands/cleanup-orphans` | `{ deleted_count, files: [...] }` — логика CLI `cleanup-orphans` (без dry-run), пути в ответе — относительно `downloads/` |
+
+- Сервис — `services/admin_service.py`; логика verify/cleanup переиспользуется из `storage.py`, CLI работает как раньше.
+- На бэкенде редактирование/загрузка треков через панель не предусмотрены — только просмотр состояния и обслуживание.
+
 ## Инфраструктура
 
 - **Dev/Prod**: dev — Vite dev-server (порт 8080) + proxy на FastAPI (порт 8000); production-режим включается env `TUNEGRAB_ENV=production` (влияет на `Secure` cookie и CORS), раздача собранного фронтенда отдельно не реализована. `ALLOWED_ORIGINS` из env.
 - **SQLite**: `journal_mode=WAL`, `busy_timeout`, **`foreign_keys=ON`**; миграции — Alembic (0001_initial_schema, 0002_active_downloads_index), не `create_all`.
-- **Health**: публичный `GET /health` → `{status, storage: ok|warn}` (проверка `downloads/` и `covers/`); `/health/details` — не реализован.
+- **Health**: публичный `GET /health` → `{status, storage: ok|warn}` (проверка `downloads/` и `covers/`); расширенный `GET /admin/health` — только для авторизованных (раздел «Админ-панель»).
 - **Логирование**: файл + консоль; ошибки, ход загрузки, ключевые действия.
 - **Ошибки**: централизованные exception handlers — 404 (TrackNotFound/StreamNotFound), 409 (файл занят, дубликат), 416 (Range), 413 (upload), 422 (Pydantic/upload), 429 (rate limit).
 - **Списки**: `q` (≤200), `sort_by` (**enum-белый список**), `order` ∈ {asc, desc}, `limit` 1–100 (дефолт 50), `offset` ≥ 0.

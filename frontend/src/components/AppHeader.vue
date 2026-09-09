@@ -10,6 +10,8 @@ const username = computed(() => auth.currentUser?.username ?? '')
 <template>
   <header class="app-header">
     <RouterLink to="/" class="app-header__logo">Tunegrab</RouterLink>
-    <span v-if="username" class="app-header__user">{{ username }}</span>
+    <RouterLink v-if="username" to="/admin" class="app-header__user" aria-label="Панель управления">
+      {{ username }}
+    </RouterLink>
   </header>
 </template>

@@ -8,7 +8,8 @@
 
 - **Библиотека** (`/library`) — общая коллекция треков;
 - **Поиск** (`/search`) — поиск YouTube, загрузки, локальный upload;
-- **Профиль** (`/settings`) — личный кабинет.
+- **Профиль** (`/settings`) — личный кабинет;
+- **Панель управления** (`/admin`) — аккаунт, состояние сервера, обслуживание.
 
 Реализованный функционал:
 
@@ -21,6 +22,7 @@
 - воспроизведение через `<audio>` с очередью, сквозным воспроизведением по библиотеке и Media Session API;
 - лайки (сердечки в библиотеке и плеере, оптимистичный toggle);
 - личный кабинет: статистика прослушиваний с переключателем периода, список «Любимое»;
+- панель управления (`/admin`): смена пароля, круговая диаграмма хранилища, очистка кэша превью, команды CLI;
 - тосты-уведомления.
 
 ## 2. Технологический стек
@@ -48,7 +50,10 @@
 
 ```text
 Vite :8080 (host: true, allowedHosts: [rknshit.com])
-  └── proxy /auth, /tracks, /youtube, /stream, /covers, /events, /likes
+  └── proxy /auth, /tracks, /youtube, /stream, /covers, /events, /likes,
+          /admin/health, /admin/thumbnails, /admin/commands
+          (админ-API — точные префиксы: широкое '/admin' перехватило бы
+          GET-навигацию на /admin при перезагрузке страницы и дало 404)
           ↓
       FastAPI :8000
 ```
@@ -88,10 +93,11 @@ frontend/
     │   ├── youtube-api.ts           #   /youtube/*: поиск, загрузки, cancel, retry
     │   ├── events-api.ts            #   /events: запись события, stats
     │   ├── likes-api.ts             #   /likes: список, ids, PUT, DELETE
+    │   ├── admin-api.ts             #   /admin: health, thumbnails/clear, команды CLI
     │   └── index.ts                 #   re-export публичного API-слоя
     ├── components/
     │   ├── AppShell.vue             # каркас защищённой области + привязка queueSupplier
-    │   ├── AppHeader.vue            # логотип + имя пользователя (стекло)
+    │   ├── AppHeader.vue            # логотип + никнейм-ссылка на /admin (стекло)
     │   ├── AppSidebar.vue           # круглые стеклянные кнопки навигации + тултипы
     │   ├── AppNotifications.vue     # тосты (TransitionGroup, aria-live, стекло)
     │   ├── AppIcon.vue              # inline-SVG-иконки по имени
@@ -99,6 +105,7 @@ frontend/
     │   ├── TrackList.vue            # <ul> из TrackRow
     │   ├── TrackRow.vue             # строка трека: обложка, статус, удаление
     │   ├── SearchForm.vue           # форма поиска (defineModel, enterkeyhint)
+    │   ├── StorageDonutChart.vue    # SVG-донат хранилища (stroke-dasharray, легенда)
     │   ├── YouTubeResultCard.vue    # карточка результата: превью, статус, кнопка
     │   ├── DownloadProgress.vue     # progressbar + aria-live-лейбл
     │   ├── LoadingState.vue / EmptyState.vue / ErrorState.vue
@@ -119,7 +126,8 @@ frontend/
     │   ├── RegisterView.vue
     │   ├── LibraryView.vue
     │   ├── SearchView.vue
-    │   └── SettingsView.vue         # личный кабинет (см. §12)
+    │   ├── SettingsView.vue        # личный кабинет (см. §12)
+    │   └── AdminView.vue           # панель управления (см. §12)
     ├── types/
     │   ├── api.ts                   # Paginated<T>
     │   ├── auth.ts                  # User, AuthResponse, payloads
@@ -127,7 +135,8 @@ frontend/
     │   ├── track.ts                 # Track, статусы, сортировка
     │   ├── youtube.ts               # поиск/загрузка/active-контракты
     │   ├── events.ts                # события прослушиваний, статистика
-    │   └── likes.ts                 # контракты лайков
+    │   ├── likes.ts                 # контракты лайков
+    │   └── admin.ts                 # контракты админ-панели
     ├── composables/
     │   ├── useDebouncedSearch.ts    # debounce + AbortGroup + state машины запроса
     │   ├── usePolling.ts            # createPolling: интервалы, visibilitychange
@@ -173,6 +182,7 @@ views / components / composables
 | `/library` | `LibraryView` |
 | `/search` | `SearchView` |
 | `/settings` | `SettingsView` |
+| `/admin` | `AdminView` |
 
 `/` → redirect на `library`. Все views загружаются лениво (`() => import(...)`); `AppShell` — тоже отдельный чанк.
 
@@ -359,6 +369,11 @@ GET  /likes                                            → LikeListResponse (п�
 GET  /likes/ids                                        → { track_ids: number[] } (все id сразу)
 PUT    /likes/{track_id}                               → 200|201 Like
 DELETE /likes/{track_id}                               → 204
+
+GET  /admin/health                                     → AdminHealth (track_count, ffmpeg, диск, размеры хранилища)
+POST /admin/thumbnails/clear                           → { deleted_files, freed_bytes }
+POST /admin/commands/verify-storage                    → { ok, errors }
+POST /admin/commands/cleanup-orphans                   → { deleted_count, files }
 ```
 
 `GET /events/me/history` (ListeningHistoryResponse с пагинацией) существует в backend-контракте и в `types/events.ts`, но фронтенд его не использует — history-api в `events-api.ts` отсутствует.
@@ -470,7 +485,17 @@ Layout (`styles/layout.css`):
 
 ## 12. Известные ограничения
 
-- `SettingsView` — личный кабинет: приветствие «Привет, {username}», секции Статистика → Плейлисты (заглушка «Появится скоро») → Любимое (с дозагрузкой при скролле), кнопка «Выйти» в шапке. Смена пароля скрыта до отдельной итерации (бэкенд `POST /auth/change-password` и `auth.changePassword` готовы).
+### Панель управления (`AdminView`)
+
+Открывается по клику на никнейм в `AppHeader` (`RouterLink to="/admin"`, aria-label «Панель управления»; sticky-hover-подсветка цвета текста, как у остальных hover-элементов). Три секции-карточки (`.card.settings-section`, токены и стекло — как в кабинете):
+
+- **Аккаунт** — секция-тоггл (форма скрыта по умолчанию): заголовок «Аккаунт» — кнопка с `aria-expanded`/`aria-controls` и CSS-шевроном (переиспользует hover/focus/reduced-motion паттерны). Внутри — форма смены пароля (текущий / новый ≥ 8 символов / повтор) поверх готового `auth-api.changePassword`; клиентская валидация длины и совпадения, ошибка 401 → «Текущий пароль неверен», успех → сброс полей + тост. Смена пароля отзывает прочие сессии (token_version) и выдаёт свежую cookie — состояние фронта не сбрасывается.
+- **Состояние сервера** — `StorageDonutChart` (SVG-донат на `stroke-dasharray`; сегменты: аудио — accent, обложки — success, превью — warning, **свободное место на диске — 4-й сегмент** в `--color-surface-hover`; нулевые категории не рендерятся вовсе — round-cap рисовал бы точку; зазор между дугами только при 2+ сегментах, одиночная дуга — полное кольцо; центр — занято всего; `role="img"` + aria-label с раскладкой) и факты: число треков, свободно на диске, статус директорий и ffmpeg (ok/warn цветами). Загрузка при маунте — `LoadingState`/`ErrorState` с retry. Легенда строится из тех же `arcs` — согласована с диаграммой автоматически.
+- **Обслуживание** — три действия с общим флагом `busyCommand` (кнопки disabled во время любой операции): «Очистить кэш превью» (`confirm()` → результат N файлов / освобождено X), «Проверить хранилище» (аналог CLI verify-storage: список ошибок или «проверка пройдена»), «Очистить сироты-файлы» (аналог CLI cleanup-orphans: `confirm()` → список удалённых). Результаты — inline-блоки + тосты через `notifications.store`; после очисток — обновление диаграммы (`loadHealth()`).
+
+Форматирование байтов (Б/КБ/МБ/ГБ/ТБ) — локальные хелперы в `AdminView` и `StorageDonutChart`.
+
+- `SettingsView` — личный кабинет: приветствие «Привет, {username}», секции Статистика → Плейлисты (заглушка «Появится скоро») → Любимое (с дозагрузкой при скролле), кнопка «Выйти» в шапке. Смена пароля живёт в панели управления `/admin` (см. выше).
   - **Статистика**: переключатель периода (24 часа / 7 дней / 30 дней — сегмент-кнопки, сменa → немедленный `refreshStats(days)`) + **автообновление каждые 30 с** через `createPolling` (`runOnStart: false`, чтобы не дублировать запрос `reloadProfile()` при маунте; в фоновой вкладке интервал больше, при возврате на вкладку — мгновенный тик). Заголовок секции отражает выбранный период; топ-3 ранжируется на бэке с затуханием по свежести (см. ARCHITECTURE.md). Общее время прослушивания показывается только в счётчиках сверху; у треков в топе время не выводится — только место, обложка, название и автор.
 - Service worker не реализован: офлайн-режима нет, `manifest.webmanifest` даёт только установку иконки/темы.
 - В `vite.config.ts` dev-порт `8080` (историческая документация упоминала `5173`).

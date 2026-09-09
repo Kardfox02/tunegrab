@@ -99,8 +99,22 @@
   max-width: 50%;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.app-header__user:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .app-header__user:hover {
+    color: var(--color-text);
+  }
 }
 
 .app-sidebar {
