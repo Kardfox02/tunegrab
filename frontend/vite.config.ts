@@ -24,6 +24,9 @@ export default defineConfig({
       '/covers': 'http://localhost:8000',
       '/events': 'http://localhost:8000',
       '/likes': 'http://localhost:8000',
+      '/admin/health': 'http://localhost:8000',
+      '/admin/thumbnails': 'http://localhost:8000',
+      '/admin/commands': 'http://localhost:8000',
     },
   },
   test: {
