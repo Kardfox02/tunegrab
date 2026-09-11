@@ -51,7 +51,12 @@ def load_settings() -> Settings:
     configured_origins = os.getenv(
         "TUNEGRAB_ALLOWED_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,"
-        "http://127.0.0.1:8080,http://SERVER_IP,http://RETIRED_DOMAIN,http://www.RETIRED_DOMAIN",
+        "http://127.0.0.1:8080,http://SERVER_IP,"
+        # NB: origin сравнивается строкой целиком; нестандартный порт 8443
+        # браузер ОБЯЗАТЕЛЬНО включает в Origin (443-й он опускает бы).
+        "https://SERVER_HOSTNAME.EXAMPLE_HOSTNAME:8443,"
+        "https://SERVER_HOSTNAME.EXAMPLE_HOSTNAME,"
+        "https://SERVER_IP:8443",
     )
     allowed_origins = tuple(
         origin.strip() for origin in configured_origins.split(",") if origin.strip()

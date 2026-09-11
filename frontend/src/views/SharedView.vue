@@ -7,7 +7,6 @@ import { createAbortGroup } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlaylistsStore } from '@/stores/playlists.store'
 import type { SharedPlaylist } from '@/types/playlists'
-import type { Track } from '@/types/track'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,10 +26,6 @@ const token = computed(() => {
 })
 
 const isLoggedIn = computed(() => auth.currentUser !== null)
-
-const playableTracks = computed<Track[]>(() =>
-  playlist.value?.tracks.filter((track) => track.audio_url !== null) ?? [],
-)
 
 // Мутация (POST) выполняется только когда сессия восстановлена: guard
 // обещает currentUser до входа в защищённые маршруты, но shared-страница

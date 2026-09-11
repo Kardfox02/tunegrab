@@ -64,7 +64,7 @@ describe('useSwipeSwitch', () => {
   })
 
   it('ignores non-touch pointers', () => {
-    const { swipe, onSwipe } = createHarness()
+    const { swipe } = createHarness()
 
     swipe.onPointerDown(createPointerEvent({ pointerId: 1, pointerType: 'mouse', clientX: 100, clientY: 100 }))
 
