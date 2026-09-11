@@ -22,6 +22,9 @@ backend/ffprobe.exe
 backend/secret_key.txt
 tunnel.sh
 
+# --- Личные планы и заметки (инфраструктура, адреса) ---
+PLANS.md
+
 # --- Логи ---
 backend/logs/
 *.log

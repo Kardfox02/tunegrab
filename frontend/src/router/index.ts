@@ -80,6 +80,12 @@ export function createAppRouter(
   const router = createRouter({
     history,
     routes,
+    // Скролл живёт на window (внутренних scroll-контейнеров нет), поэтому
+    // управляем позицией роутером: при обычной навигации — верх страницы,
+    // назад/вперёд — восстановление сохранённой позиции.
+    scrollBehavior(_to, _from, savedPosition) {
+      return savedPosition ?? { top: 0 }
+    },
   })
   const auth = useAuthStore(pinia)
 

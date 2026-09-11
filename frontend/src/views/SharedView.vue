@@ -95,72 +95,74 @@ function formatDuration(seconds: number | null): string {
 </script>
 
 <template>
-  <div class="stack shared-view">
-    <div class="page-header">
-      <div>
-        <h1>{{ playlist?.name ?? 'Плейлист' }}</h1>
-        <p v-if="playlist" class="shared-view__owner">Поделился: {{ playlist.owner_username }}</p>
+  <main class="page">
+    <div class="stack shared-view">
+      <div class="page-header">
+        <div>
+          <h1>{{ playlist?.name ?? 'Плейлист' }}</h1>
+          <p v-if="playlist" class="shared-view__owner">Поделился: {{ playlist.owner_username }}</p>
+        </div>
       </div>
-    </div>
 
-    <LoadingState v-if="isLoading" message="Загружаем плейлист…" />
+      <LoadingState v-if="isLoading" message="Загружаем плейлист…" />
 
-    <ErrorState v-else-if="error" :message="error" @retry="load" />
+      <ErrorState v-else-if="error" :message="error" @retry="load" />
 
-    <template v-else-if="playlist">
-      <section class="card settings-section">
-        <h2 class="settings-section__title">Треки • {{ playlist.tracks.length }}</h2>
+      <template v-else-if="playlist">
+        <section class="card settings-section">
+          <h2 class="settings-section__title">Треки • {{ playlist.tracks.length }}</h2>
 
-        <p v-if="playlist.tracks.length === 0" class="settings-section__empty">
-          В этом плейлисте пока нет треков.
+          <p v-if="playlist.tracks.length === 0" class="settings-section__empty">
+            В этом плейлисте пока нет треков.
+          </p>
+
+          <ol v-else class="shared-view__tracks">
+            <li v-for="(track, index) in playlist.tracks" :key="track.id" class="shared-view__track">
+              <span class="shared-view__rank" aria-hidden="true">{{ index + 1 }}</span>
+              <img
+                v-if="track.cover_url"
+                :src="track.cover_url"
+                alt=""
+                loading="lazy"
+                decoding="async"
+                class="shared-view__cover"
+              >
+              <span v-else class="shared-view__cover shared-view__cover--placeholder" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M9 18V6.5L19 5v11.5"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
+                  <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
+                </svg>
+              </span>
+              <span class="shared-view__info">
+                <span class="shared-view__title">{{ track.title }}</span>
+                <span class="shared-view__author">{{ track.author }}</span>
+              </span>
+              <span class="shared-view__duration">{{ formatDuration(track.duration) }}</span>
+            </li>
+          </ol>
+        </section>
+
+        <section v-if="!isLoggedIn" class="card settings-section shared-view__cta">
+          <p>Хотите слушать? Войдите в свой аккаунт Tunegrab.</p>
+          <RouterLink class="btn btn-primary" :to="{ name: 'login', query: { redirect: route.fullPath } }">
+            Войти
+          </RouterLink>
+        </section>
+        <section v-else-if="subscribedPlaylistId !== null" class="card settings-section shared-view__cta">
+          <p>Плейлист добавлен в ваши плейлисты — изменения автора будут видны автоматически.</p>
+          <button class="btn btn-primary" type="button" @click="openPlaylist">Открыть плейлист</button>
+        </section>
+        <p v-else class="settings-section__empty">
+          Откройте этот плейлист в Tunegrab — треки доступны для воспроизведения.
         </p>
-
-        <ol v-else class="shared-view__tracks">
-          <li v-for="(track, index) in playlist.tracks" :key="track.id" class="shared-view__track">
-            <span class="shared-view__rank" aria-hidden="true">{{ index + 1 }}</span>
-            <img
-              v-if="track.cover_url"
-              :src="track.cover_url"
-              alt=""
-              loading="lazy"
-              decoding="async"
-              class="shared-view__cover"
-            >
-            <span v-else class="shared-view__cover shared-view__cover--placeholder" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M9 18V6.5L19 5v11.5"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
-                <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
-              </svg>
-            </span>
-            <span class="shared-view__info">
-              <span class="shared-view__title">{{ track.title }}</span>
-              <span class="shared-view__author">{{ track.author }}</span>
-            </span>
-            <span class="shared-view__duration">{{ formatDuration(track.duration) }}</span>
-          </li>
-        </ol>
-      </section>
-
-      <section v-if="!isLoggedIn" class="card settings-section shared-view__cta">
-        <p>Хотите слушать? Войдите в свой аккаунт Tunegrab.</p>
-        <RouterLink class="btn btn-primary" :to="{ name: 'login', query: { redirect: route.fullPath } }">
-          Войти
-        </RouterLink>
-      </section>
-      <section v-else-if="subscribedPlaylistId !== null" class="card settings-section shared-view__cta">
-        <p>Плейлист добавлен в ваши плейлисты — изменения автора будут видны автоматически.</p>
-        <button class="btn btn-primary" type="button" @click="openPlaylist">Открыть плейлист</button>
-      </section>
-      <p v-else class="settings-section__empty">
-        Откройте этот плейлист в Tunegrab — треки доступны для воспроизведения.
-      </p>
-    </template>
-  </div>
+      </template>
+    </div>
+  </main>
 </template>

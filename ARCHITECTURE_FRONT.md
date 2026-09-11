@@ -197,6 +197,8 @@ views / components / composables
 
 Фабрика принимает `Pinia` и историю (для тестов — `createMemoryHistory`), что позволяет собирать router вне бутстрапа приложения.
 
+`scrollBehavior`: скролл живёт на `window` (внутренних scroll-контейнеров у макета нет), поэтому позицию управляет роутер — при обычной навигации страница открывается сверху (`{ top: 0 }`), а при навигации назад/вперёд восстанавливается `savedPosition` браузера. Без этой опции SPA сохраняла бы уровень скролла предыдущей страницы при переключении вкладок.
+
 `router.beforeEach`:
 
 ```text
@@ -495,7 +497,8 @@ Layout (`styles/layout.css`):
 
 - mobile-first; `AppShell` — flex-колонка `min-height: 100svh` (desktop — grid `header/content` с `1fr`), рабочая область — flex-колонка: view может прижимать контент к низу страницы (`margin-top: auto`, пример — кнопка «Загрузить свой трек» в `SearchView`);
 - до 767px навигация — плавающий нижний dock-док; `PlayerBar` закреплён над ним; контент получает нижний отступ под плеер + мобильную навигацию + `env(safe-area-inset-bottom)`;
-- горизонтальный скролл запрещён (`overflow-x: hidden`, `min-width: 320px`).
+- горизонтальный скролл запрещён (`overflow-x: hidden`, `min-width: 320px`);
+- safe-area: body несёт горизонтальные паддинги `env(safe-area-inset-left/right)` — контент не прилипает к краям на устройствах с вырезами, при этом fixed-элементы (плеер, навигация, тосты), позиционируемые от вьюпорта, остаются на своих местах. Контейнер страниц — `.page` (`width: min(100% − 2rem, --content-max-width)`, центр, вертикальные паддинги; с 768px поля 4rem) — обязателен и для публичных страниц вне `AppShell` (`SharedView`).
 
 Доступность:
 
@@ -539,12 +542,12 @@ Layout (`styles/layout.css`):
 - **`playlists.store`**: список плиток (`load(force)`, force при входе в кабинет и retry), detail по id (`loadDetail(id, force)`), CRUD (`create` с тостом, `rename`, `remove`), треки (`addTrack` возвращает detail + тост об успехе, `removeTrack` локально + компактизация счётчика), **оптимистичный `reorder`** (порядок применяется сразу, откат + тост при ошибке), share (`share` → новый `share_url`, `revokeShare`), подписки (`subscribeByToken` — тихий идемпотентный POST, возвращает id или null; `unsubscribe` — 204 + локальное удаление плитки + тост), teardown-сброс.
 - **`PlaylistView`**:
   - заголовок (+ «от {author}» для соавтора) + кнопка «Назад»; «Переименовать» — у обоих; «Отписаться» (danger-кнопка) — только у соавтора;
-  - share-блок (`v-if="isOwner"`): создание/копирование (`navigator.clipboard.writeText` напрямую, без `window.clipboard`-подтверждений; fallback — `prompt()` при отказе clipboard API)/отзыв ссылки;
+  - share-блок (`v-if="isOwner"`): создание/копирование (`navigator.clipboard.writeText`; работает только в secure context — на HTTP-доменах clipboard API недоступен и срабатывает fallback `prompt()`; подробности HTTPS-перехода — в личных заметках, не в репозитории)/отзыв ссылки;
   - треки через `TrackList` (play = `player.playOrToggle(track, items)` — очередь = плейлист); удаление трека из плейлиста — **крестик** (`remove-icon="close"` в `TrackRow`), трек остаётся в библиотеке;
   - **мок-строка «Добавить трек» первой** в секции треков; раскрывает **пикер**: поиск (локальный debounce 350 мс + AbortGroup), партии по 50 с догрузкой при скролле (`useInfiniteScroll` + сентинел внутри пикера), уже добавленные треки **скрываются** (клиентский фильтр + дедупликация партий по id — offset-пагинация даёт дубли), клик → `addTrack` (тост «Трек добавлен в плейлист»; 409 гонки гасится тостом бэка). Состояние пикера локальное в view, запросы идут напрямую через `tracks-api` (library.store не трогается);
   - **drag&drop reorder**: pointer events по drag-handle (`grip`) **слева от обложки** (отдельная grid-колонка `track-row--draggable` в `TrackRow`, включая desktop-media-override), `pointerdown` на handle → `dragStart`, `pointerenter` строк → `dropIndex`, document `pointerup` → `dragEnd`; **автоскролл**: во время drag document-`pointermove` + rAF-цикл, курсор в зоне ≤80px от верх/низ вьюпорта прокручивает страницу (скорость растёт у края); drop → оптимистичный `reorder` + `PUT /tracks/order`.
-- **Добавление из библиотеки и «Любимого»**: кнопка «в плейлист» в `TrackRow` (`addToPlaylist`, prop `showAddToPlaylist`) → модальный поповер `AddToPlaylistPopover` со списком плейлистов (иконка, имя, счётчик).
-- **`SharedView`** (`/shared/:token`): загрузка по токену (404/отзыв → ErrorState с retry), список треков (номер, обложка, title/author, длительность) **без кнопок воспроизведения**; аноним → CTA «Войти» с `redirect` обратно на share-ссылку; залогиненный → тихая **автоподписка** (`POST /subscribe`, дожидается `auth.initialized`, чтобы не подписаться под чужой сессией) → карточка «Плейлист добавлен в ваши плейлисты» + кнопка «Открыть плейлист» → `/playlists/{id}`.
+- **Добавление из библиотеки и «Любимого»**: кнопка «в плейлист» в `TrackRow` (`addToPlaylist`, prop `showAddToPlaylist`) → модальный поповер `AddToPlaylistPopover` с **сеткой плиток** плейлистов (auto-fill `minmax(8.5rem, 1fr)`): стеклянная иконка, имя с ellipsis, атрибуция «от {username}» для соавторских, счётчик треков со склонением; пустой список — сообщение «Плейлистов пока нет».
+- **`SharedView`** (`/shared/:token`): публичная страница вне `AppShell`, но контейнеризация как у остальных — корень `<main class="page">` + `stack shared-view` (горизонтальные поля, max-width, центрирование, `<main>`-landmark). Загрузка по токену (404/отзыв → ErrorState с retry), `page-header` (название + «Поделился: {owner_username}»), список треков (номер, обложка, title/author, длительность) **без кнопок воспроизведения**; аноним → CTA «Войти» с `redirect` обратно на share-ссылку; залогиненный → тихая **автоподписка** (`POST /subscribe`, дожидается `auth.initialized`, чтобы не подписаться под чужой сессией) → карточка «Плейлист добавлен в ваши плейлисты» + кнопка «Открыть плейлист» → `/playlists/{id}`.
 
 ### Иконки
 
@@ -564,12 +567,12 @@ Layout (`styles/layout.css`):
 | `stores/__tests__/downloads.store.test.ts` | restore + polling, терминальные статусы, связь с результатами поиска, дедупликация, stale generation (cancel/retry/reset), скрытая вкладка, teardown, abort in-flight |
 | `stores/__tests__/player.store.test.ts` | команды адаптера, персист громкости, контекст prev/next с пропуском неготовых, prefetch supplier, fallback `ended`, эпохи против гонок, очередь, removeTrack, teardown, автовосстановление стрима (retry с позицией, лимит попыток, stall-watchdog, сброс при смене трека/паузе) |
 | `stores/__tests__/profile.store.test.ts` | ленивая загрузка один раз за сессию, сердечки из `/likes/ids` видны для лайков за пределами первой партии списка, догрузка «Любимого» не перезаписывает ids, reloadProfile, оптимистичный toggle + откат, дедупликация страниц, teardown |
-| `router/__tests__/guards.test.ts` | redirect anonymous с сохранением `redirect`, guestOnly, один restore на навигации, redirect на login при transient-сбое restore и повтор после восстановления, 401 после входа → login |
+| `router/__tests__/guards.test.ts` | redirect anonymous с сохранением `redirect`, guestOnly, один restore на навигации, redirect на login при transient-сбое restore и повтор после восстановления, 401 после входа → login, scrollBehavior (сброс наверх при навигации, восстановление `savedPosition` при back/forward) |
 | `views/__tests__/library-view.test.ts` | рендер строк и счётчик, debounce-поиск → URL, сортировка → URL, сентинел/спиннер догрузки, play через store, сквозное воспроизведение в следующую партию, локальное удаление, live-прогресс |
 | `views/__tests__/search-view.test.ts` | рендер результатов, empty/error/429-retry, постановка загрузок и статусы кнопок, upload (успех/ошибка/disabled), обновление библиотеки после upload |
 | `views/__tests__/auth-views.test.ts` | login с `redirect`, register |
 | `views/__tests__/profile-view.test.ts` | кабинет: статистика и переключатель периода, секция «Любимое», плитки плейлистов, logout |
-| `components/__tests__/player-bar.test.ts` | связь audio events ↔ store, исполнение команд, инпуты seek/volume, восстановление стрима после `error` вместо финальной ошибки |
+| `components/__tests__/player-bar.test.ts` | связь audio events ↔ store, использование команд, инпуты seek/volume, восстановление стрима после `error` вместо финальной ошибки |
 | `components/__tests__/app-shell.test.ts` | protected shell: навигация + пользователь |
 | `composables/__tests__/use-debounced-search.test.ts` | debounce, minLength, abort, ошибки |
 | `services/__tests__/cover-color.service.test.ts` | квантование, сохранение hue, отброс выбросов, прозрачный сэмпл → null |

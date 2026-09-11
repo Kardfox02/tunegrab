@@ -441,93 +441,89 @@ watch(
         </p>
       </section>
 
-      <section class="card settings-section" aria-label="Треки плейлиста">
-        <h2 class="settings-section__title">Треки</h2>
+      <button
+        class="playlist-view__add-track"
+        type="button"
+        @click="isPickerOpen ? closePicker() : openPicker()"
+      >
+        <AppIcon name="plus" />
+        <span>{{ isPickerOpen ? 'Скрыть' : 'Добавить трек' }}</span>
+      </button>
 
-        <button
-          class="playlist-view__add-track"
-          type="button"
-          @click="isPickerOpen ? closePicker() : openPicker()"
+      <div v-if="isPickerOpen" class="playlist-picker">
+        <input
+          v-model="pickerQuery"
+          class="input playlist-picker__search"
+          type="search"
+          placeholder="Поиск в библиотеке…"
+          aria-label="Поиск трека в библиотеке"
         >
-          <AppIcon name="plus" />
-          <span>{{ isPickerOpen ? 'Скрыть' : 'Добавить трек' }}</span>
-        </button>
-
-        <div v-if="isPickerOpen" class="playlist-picker">
-          <input
-            v-model="pickerQuery"
-            class="input playlist-picker__search"
-            type="search"
-            placeholder="Поиск в библиотеке…"
-            aria-label="Поиск трека в библиотеке"
-          >
-          <p v-if="pickerError" class="playlist-picker__error">{{ pickerError }}</p>
-          <p v-else-if="pickerVisibleResults.length === 0 && !isLoadingPickerPage" class="playlist-picker__empty">
-            {{ pickerQuery.trim() ? 'Ничего не найдено' : 'Все треки уже в плейлисте' }}
-          </p>
-          <ul v-else class="playlist-picker__list">
-            <li v-for="track in pickerVisibleResults" :key="track.id">
-              <button type="button" class="playlist-picker__item" @click="addTrackToPlaylist(track)">
-                <img
-                  v-if="track.cover_url"
-                  :src="track.cover_url"
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  class="playlist-picker__cover"
-                >
-                <span v-else class="playlist-picker__cover playlist-picker__cover--placeholder" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M9 18V6.5L19 5v11.5"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                    <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
-                    <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
-                  </svg>
-                </span>
-                <span class="playlist-picker__info">
-                  <span class="playlist-picker__title">{{ track.title }}</span>
-                  <span class="playlist-picker__author">{{ track.author }}</span>
-                </span>
-                <AppIcon name="plus" class="playlist-picker__add-icon" />
-              </button>
-            </li>
-          </ul>
-          <div v-if="hasMorePickerResults" ref="pickerSentinel" class="library-view__sentinel">
-            <span v-if="isLoadingPickerPage" class="spinner" aria-hidden="true"></span>
-          </div>
-        </div>
-
-        <p v-if="playlists.detailTracks.length === 0" class="settings-section__empty">
-          Плейлист пуст — добавьте треки кнопкой выше.
+        <p v-if="pickerError" class="playlist-picker__error">{{ pickerError }}</p>
+        <p v-else-if="pickerVisibleResults.length === 0 && !isLoadingPickerPage" class="playlist-picker__empty">
+          {{ pickerQuery.trim() ? 'Ничего не найдено' : 'Все треки уже в плейлисте' }}
         </p>
+        <ul v-else class="playlist-picker__list">
+          <li v-for="track in pickerVisibleResults" :key="track.id">
+            <button type="button" class="playlist-picker__item" @click="addTrackToPlaylist(track)">
+              <img
+                v-if="track.cover_url"
+                :src="track.cover_url"
+                alt=""
+                loading="lazy"
+                decoding="async"
+                class="playlist-picker__cover"
+              >
+              <span v-else class="playlist-picker__cover playlist-picker__cover--placeholder" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M9 18V6.5L19 5v11.5"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
+                  <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
+                </svg>
+              </span>
+              <span class="playlist-picker__info">
+                <span class="playlist-picker__title">{{ track.title }}</span>
+                <span class="playlist-picker__author">{{ track.author }}</span>
+              </span>
+              <AppIcon name="plus" class="playlist-picker__add-icon" />
+            </button>
+          </li>
+        </ul>
+        <div v-if="hasMorePickerResults" ref="pickerSentinel" class="library-view__sentinel">
+          <span v-if="isLoadingPickerPage" class="spinner" aria-hidden="true"></span>
+        </div>
+      </div>
 
-        <TrackList
-          v-else
-          :tracks="playlists.detailTracks"
-          :deleting-ids="[]"
-          :delete-error="null"
-          :current-track-id="player.currentTrack?.id ?? null"
-          :is-playing="player.isPlaying"
-          :liked-track-ids="profile.likedTrackIds"
-          :toggling-like-ids="profile.togglingIds"
-          :show-add-to-playlist="false"
-          remove-icon="close"
-          :draggable="true"
-          :drag-index="dragIndex"
-          :drop-index="dropIndex"
-          @play="playFromPlaylist"
-          @remove="removeTrackFromPlaylist"
-          @toggle-like="(track) => profile.toggleLike(track)"
-          @drag-start="onRowDragStart"
-          @drag-over-row="onRowDragOver"
-          @drag-end="onRowDragEnd"
-        />
-      </section>
+      <p v-if="playlists.detailTracks.length === 0" class="settings-section__empty">
+        Плейлист пуст — добавьте треки кнопкой выше.
+      </p>
+
+      <TrackList
+        v-else
+        :tracks="playlists.detailTracks"
+        :deleting-ids="[]"
+        :delete-error="null"
+        :current-track-id="player.currentTrack?.id ?? null"
+        :is-playing="player.isPlaying"
+        :liked-track-ids="profile.likedTrackIds"
+        :toggling-like-ids="profile.togglingIds"
+        :show-add-to-playlist="false"
+        remove-icon="close"
+        :draggable="true"
+        :drag-index="dragIndex"
+        :drop-index="dropIndex"
+        @play="playFromPlaylist"
+        @remove="removeTrackFromPlaylist"
+        @toggle-like="(track) => profile.toggleLike(track)"
+        @drag-start="onRowDragStart"
+        @drag-over-row="onRowDragOver"
+        @drag-end="onRowDragEnd"
+      />
     </template>
   </div>
 </template>

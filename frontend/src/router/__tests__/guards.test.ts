@@ -168,3 +168,34 @@ describe('router guards', () => {
     expect(router.currentRoute.value.name).toBe('login')
   })
 })
+
+describe('router scrollBehavior', () => {
+  it('resets scroll to top on ordinary navigation', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createAppRouter(pinia, createMemoryHistory())
+
+    const position = await router.options.scrollBehavior?.(
+      { path: '/search' } as never,
+      { path: '/library' } as never,
+      null,
+    )
+
+    expect(position).toEqual({ top: 0 })
+  })
+
+  it('restores saved position on back/forward navigation', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createAppRouter(pinia, createMemoryHistory())
+
+    const saved = { left: 0, top: 1240 }
+    const position = await router.options.scrollBehavior?.(
+      { path: '/library' } as never,
+      { path: '/search' } as never,
+      saved,
+    )
+
+    expect(position).toBe(saved)
+  })
+})

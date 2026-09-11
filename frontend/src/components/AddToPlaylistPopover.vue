@@ -18,15 +18,22 @@ const playlists = usePlaylistsStore()
         ✕
       </button>
     </div>
-    <ul class="playlist-popover__list">
-      <li v-for="playlist in playlists.playlists" :key="playlist.id">
-        <button type="button" class="playlist-popover__item" @click="emit('add', playlist.id)">
-          <AppIcon name="playlist" class="playlist-popover__icon" />
-          <span class="playlist-popover__name">{{ playlist.name }}</span>
-          <span class="playlist-popover__count">{{ playlist.track_count }}</span>
-        </button>
-      </li>
-      <li v-if="!playlists.hasPlaylists" class="playlist-popover__empty">Плейлистов пока нет</li>
-    </ul>
+    <div class="playlist-popover__grid">
+      <button
+        v-for="playlist in playlists.playlists"
+        :key="playlist.id"
+        type="button"
+        class="playlist-popover__tile"
+        @click="emit('add', playlist.id)"
+      >
+        <span class="playlist-popover__icon" aria-hidden="true">
+          <AppIcon name="playlist" />
+        </span>
+        <span class="playlist-popover__name">{{ playlist.name }}</span>
+        <span v-if="!playlist.is_owner" class="playlist-popover__owner">от {{ playlist.owner_username }}</span>
+        <span class="playlist-popover__count">{{ playlist.track_count }}</span>
+      </button>
+      <p v-if="!playlists.hasPlaylists" class="playlist-popover__empty">Плейлистов пока нет</p>
+    </div>
   </div>
 </template>

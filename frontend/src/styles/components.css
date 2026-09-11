@@ -1628,10 +1628,25 @@
 
 /* ── Страница плейлиста ───────────────────────────────────────── */
 
+/* На узких экранах блок действий переносится под заголовок — иначе
+   «Переименовать» + «Отписаться» не помещаются и расширяют layout viewport
+   (плеер и fixed-элементы уезжают за правый край на Android). */
+.playlist-view .page-header {
+  flex-wrap: wrap;
+  row-gap: var(--space-3);
+}
+
 .playlist-view__heading {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
+}
+
+.playlist-view__heading h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .playlist-view__back {
@@ -1657,6 +1672,7 @@
 
 .playlist-view__header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -1945,7 +1961,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  width: min(22rem, calc(100vw - 2 * var(--space-4)));
+  width: min(30rem, calc(100vw - 2 * var(--space-4)));
   max-height: min(28rem, 80vh);
   padding: var(--space-4);
   border: 1px solid var(--glass-border);
@@ -1976,69 +1992,88 @@
   cursor: pointer;
 }
 
-.playlist-popover__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.playlist-popover__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: var(--space-2);
   overflow-y: auto;
+  align-content: start;
 }
 
-.playlist-popover__item {
+.playlist-popover__tile {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: var(--space-2);
-  width: 100%;
-  min-height: var(--touch-target);
-  padding: var(--space-2) var(--space-3);
-  border: 0;
+  min-height: 6.5rem;
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: transparent;
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
   color: var(--color-text);
   text-align: left;
   cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.playlist-popover__icon {
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-}
-
-.playlist-popover__name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .playlist-popover__item:hover {
-    background: var(--color-surface-hover, rgba(255, 255, 255, 0.08));
+  .playlist-popover__tile:hover {
+    background: var(--glass-surface-strong);
+    border-color: var(--color-accent);
+    transform: translateY(-2px);
   }
 }
 
-.playlist-popover__item:focus-visible {
+.playlist-popover__tile:focus-visible {
   outline: var(--focus-ring-width, 2px) solid var(--color-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
+}
+
+.playlist-popover__icon {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--glass-surface-strong);
+  color: var(--color-text-muted);
+}
+
+.playlist-popover__icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.playlist-popover__name {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.playlist-popover__owner {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 .playlist-popover__count {
+  margin-top: auto;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
 
 .playlist-popover__empty {
+  grid-column: 1 / -1;
   padding: var(--space-3);
   color: var(--color-text-muted);
   text-align: center;
-}
-
-.playlist-popover__create {
-  justify-content: center;
 }
