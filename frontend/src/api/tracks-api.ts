@@ -1,15 +1,17 @@
-import { apiClient } from './client'
+import { apiClient, request } from './client'
 import type { Track, TrackListQuery, TrackListResponse } from '@/types/track'
 
 export async function listTracks(
   query: TrackListQuery = {},
   signal?: AbortSignal,
 ): Promise<TrackListResponse> {
-  const response = await apiClient.get<TrackListResponse>('/tracks', {
+  return request<TrackListResponse>({
+    url: '/tracks',
     params: { ...query },
     signal,
+    assertShape: (body) => Array.isArray((body as TrackListResponse | null)?.items),
+    malformedMessage: 'Malformed tracks response',
   })
-  return response.data
 }
 
 export async function deleteTrack(trackId: number): Promise<void> {
@@ -19,6 +21,9 @@ export async function deleteTrack(trackId: number): Promise<void> {
 export async function uploadTrack(file: File): Promise<Track> {
   const formData = new FormData()
   formData.append('file', file)
-  const response = await apiClient.post<Track>('/tracks/upload', formData)
-  return response.data
+  return request<Track>({
+    url: '/tracks/upload',
+    method: 'post',
+    data: formData,
+  })
 }

@@ -15,7 +15,6 @@ export default defineConfig({
     host: true,
     port: 8080,
     strictPort: true,
-    allowedHosts: ['RETIRED_DOMAIN'],
     proxy: {
       '/auth': 'http://localhost:8000',
       '/tracks': 'http://localhost:8000',

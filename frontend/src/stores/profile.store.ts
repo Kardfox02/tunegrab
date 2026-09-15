@@ -34,8 +34,64 @@ export const useProfileStore = defineStore('profile', () => {
   const isLoadingLikesNextPage = ref(false)
   const likesNextPagePromise: { current: Promise<void> | null } = { current: null }
 
+  // Epoch сессии данных: инкремент при teardown (logout) и при reloadProfile.
+  // Async-операции захватывают значение до await и проверяют после — ответ,
+  // пришедший после сброса, не пишет в состояние (гонка с logout/перезагрузкой).
+  let dataEpoch = 0
+
   const hasLikes = computed(() => likedTracks.value.length > 0)
   const hasMoreLikes = computed(() => likesCursor.value < likesTotal.value)
+
+  // ── Полный сбор «Любимого» (для «Перемешать и играть») ─────────────────
+  const LIKES_COLLECT_LIMIT = 100 // серверный cap схемы likes
+  const isCollectingLikes = ref(false)
+
+  /**
+   * Догружает все лайки за один вызов (страницы по 100 параллельными
+   * волнами). Порядок результата неважен — коллекция для перемешивания.
+   */
+  async function collectAllLikes(): Promise<Track[]> {
+    if (isCollectingLikes.value) {
+      return []
+    }
+
+    isCollectingLikes.value = true
+    try {
+      const first = await fetchLikes({ limit: LIKES_COLLECT_LIMIT, offset: 0 })
+      const collected: Track[] = first.items.map((entry) => entry.track)
+      const totalCount = first.total
+
+      const offsets: number[] = []
+      for (let offset = LIKES_COLLECT_LIMIT; offset < totalCount; offset += LIKES_COLLECT_LIMIT) {
+        offsets.push(offset)
+      }
+
+      const WAVE = 6
+      for (let start = 0; start < offsets.length; start += WAVE) {
+        const wave = offsets
+          .slice(start, start + WAVE)
+          .map((offset) => fetchLikes({ limit: LIKES_COLLECT_LIMIT, offset }))
+        const responses = await Promise.all(wave)
+        for (const response of responses) {
+          collected.push(...response.items.map((entry) => entry.track))
+        }
+      }
+
+      // Дедупликация: оптимистичные лайки/анлайки во время сбора могут дать
+      // дубль между страницами.
+      const seen = new Set<number>()
+      const unique: Track[] = []
+      for (const track of collected) {
+        if (!seen.has(track.id)) {
+          seen.add(track.id)
+          unique.push(track)
+        }
+      }
+      return unique
+    } finally {
+      isCollectingLikes.value = false
+    }
+  }
 
   // Полный набор лайкнутых id (все страницы) — источник для сердечек.
   // Живёт независимо от постраничного списка likedTracks: список «Любимого»
@@ -58,6 +114,7 @@ export const useProfileStore = defineStore('profile', () => {
       return
     }
 
+    const epochAtStart = dataEpoch
     isLoading.value = true
     isStatsLoading.value = true
     isLoadingLikes.value = true
@@ -69,6 +126,13 @@ export const useProfileStore = defineStore('profile', () => {
       fetchLikedTrackIds(),
       fetchLikes({ limit: LIKES_PAGE_LIMIT, offset: 0 }),
     ])
+
+    // Logout (или reloadProfile) во время запроса: сброшенное состояние не
+    // заполняется данными чужой сессии; isLoaded остаётся false, следующий
+    // вход перезагрузит данные заново.
+    if (epochAtStart !== dataEpoch) {
+      return
+    }
 
     if (statsResult.status === 'fulfilled' && statsResult.value && typeof statsResult.value === 'object' && 'play_count' in statsResult.value) {
       stats.value = statsResult.value
@@ -97,6 +161,9 @@ export const useProfileStore = defineStore('profile', () => {
   // Каждый вход в кабинет — свежие данные: сбрасываем состояние (секции
   // покажут спиннеры) и грузим stats + likes заново.
   async function reloadProfile(): Promise<void> {
+    // Инкремент epoch «аннулирует» все in-flight запросы предыдущего прохода
+    // (в том числе незавершённый loadNextLikes): их ответы будут отброшены.
+    dataEpoch += 1
     stats.value = null
     applyLikedTracks([], 0)
     setLikedTrackIds([])
@@ -114,7 +181,9 @@ export const useProfileStore = defineStore('profile', () => {
       return likesNextPagePromise.current
     }
 
-    const request = (async () => {
+    const epochAtStart = dataEpoch
+    let request: Promise<void> = Promise.resolve()
+    request = (async () => {
       isLoadingLikesNextPage.value = true
       try {
         const response = await fetchLikes({
@@ -123,6 +192,11 @@ export const useProfileStore = defineStore('profile', () => {
         })
         if (!Array.isArray(response?.items)) {
           throw new Error('Malformed likes response')
+        }
+
+        // Teardown/reload во время запроса — ответ устарел.
+        if (epochAtStart !== dataEpoch) {
+          return
         }
 
         // Offset-пагинация + оптимистичные удаления дают дубли — фильтруем.
@@ -135,10 +209,17 @@ export const useProfileStore = defineStore('profile', () => {
         likesTotal.value = response.total
         likesError.value = null
       } catch {
-        likesError.value = 'Не удалось загрузить любимые треки'
+        // Ошибка в прошлом проходе после сброса состояния не актуальна.
+        if (epochAtStart === dataEpoch) {
+          likesError.value = 'Не удалось загрузить любимые треки'
+        }
       } finally {
-        isLoadingLikesNextPage.value = false
-        likesNextPagePromise.current = null
+        if (epochAtStart === dataEpoch) {
+          isLoadingLikesNextPage.value = false
+        }
+        if (likesNextPagePromise.current === request) {
+          likesNextPagePromise.current = null
+        }
       }
     })()
 
@@ -159,7 +240,12 @@ export const useProfileStore = defineStore('profile', () => {
     }
   }
 
+  // Гонка периодов: клик «30 дней» + поллинг «7 дней» — чей ответ пришёл
+  // последним, тот и победил, независимо от выбранного периода. Request-id
+  // обеспечивает запись только последнего запроса.
+  let statsRequestId = 0
   async function refreshStats(periodDays?: number): Promise<void> {
+    const requestId = ++statsRequestId
     isStatsLoading.value = true
     statsError.value = null
     try {
@@ -167,11 +253,19 @@ export const useProfileStore = defineStore('profile', () => {
       if (!fetched || typeof fetched !== 'object' || !('play_count' in fetched)) {
         throw new Error('Malformed stats response')
       }
+      if (requestId !== statsRequestId) {
+        // Пришёл более старый запрос — newer запрос уже перезаписал stats.
+        return
+      }
       stats.value = fetched
     } catch {
-      statsError.value = 'Не удалось загрузить статистику'
+      if (requestId === statsRequestId) {
+        statsError.value = 'Не удалось загрузить статистику'
+      }
     } finally {
-      isStatsLoading.value = false
+      if (requestId === statsRequestId) {
+        isStatsLoading.value = false
+      }
     }
   }
 
@@ -228,6 +322,10 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   auth.onSessionTeardown(() => {
+    // Инкремент epoch отбрасывает ответы всех in-flight запросов сессии:
+    // late-response не должен писать в состояние нового пользователя.
+    dataEpoch += 1
+    statsRequestId += 1
     stats.value = null
     applyLikedTracks([], 0)
     setLikedTrackIds([])
@@ -257,6 +355,8 @@ export const useProfileStore = defineStore('profile', () => {
     hasMoreLikes,
     isLoadingLikes,
     isLoadingLikesNextPage,
+    isCollectingLikes,
+    collectAllLikes,
     loadProfile,
     reloadProfile,
     loadNextLikes,

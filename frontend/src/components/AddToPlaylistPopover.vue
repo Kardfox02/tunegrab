@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
+
 import { usePlaylistsStore } from '@/stores/playlists.store'
 import AppIcon from '@/components/AppIcon.vue'
 import type { Track } from '@/types/track'
@@ -8,10 +10,37 @@ defineProps<{ track: Track }>()
 const emit = defineEmits<{ close: []; add: [playlistId: number] }>()
 
 const playlists = usePlaylistsStore()
+
+// Диалог закрывается по Escape и по клику/тапу вне себя: без этого поповер
+// можно закрыть только кнопкой ✕ — недопустимо для role="dialog".
+const rootElement = ref<HTMLElement | null>(null)
+
+function onDocumentPointerDown(event: PointerEvent): void {
+  const root = rootElement.value
+  if (root !== null && event.target instanceof Node && !root.contains(event.target)) {
+    emit('close')
+  }
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown, true)
+  document.addEventListener('keydown', onKeydown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+  document.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
-  <div class="playlist-popover" role="dialog" aria-label="Добавить в плейлист">
+  <div ref="rootElement" class="playlist-popover" role="dialog" aria-label="Добавить в плейлист">
     <div class="playlist-popover__header">
       <span>Добавить «{{ track.title }}» в…</span>
       <button class="playlist-popover__close" type="button" aria-label="Закрыть" @click="emit('close')">

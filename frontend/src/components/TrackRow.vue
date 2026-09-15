@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import AppIcon from './AppIcon.vue'
 import DownloadProgress from './DownloadProgress.vue'
 import { useIsDesktop } from '@/composables/useMediaQuery'
-import { resolveCoverColor } from '@/services/cover-color.service'
+import { getCachedCoverColor, getCoverAccentColor } from '@/services/cover-color.service'
 import { usePlayerStore } from '@/stores/player.store'
 import type { Track, TrackStatus } from '@/types/track'
 
@@ -35,19 +35,31 @@ const isCurrent = computed(() => props.isCurrent === true)
 const isCurrentPlaying = computed(() => isCurrent.value && props.isPlaying === true)
 
 // Акцент из цвета обложки своей строки: красит hover/current-состояния.
-// Кэш сервиса синхронный после первого извлечения — гидратируем ref при
-// смене обложки и при готовности цвета.
+// Извлечение ленивое: резерв простой гидратации из кэша при маунте, но
+// тяжёлая загрузка Image запускается только событием load у ВИДИМОЙ картинки
+// (offscreen-строки не качают обложки — сохраняется смысл loading="lazy").
 const accent = ref<string | null>(null)
 const accentBump = ref(0)
+// Битая обложка: ловим error у <img> и переключаемся на SVG-заглушку.
+// Сброс — при смене cover_url (новая обложка могла загрузиться нормально).
+const coverFailed = ref(false)
+
+function onCoverLoaded(): void {
+  void getCoverAccentColor(props.track.cover_url as string).then((color) => {
+    if (color) {
+      accent.value = color
+      accentBump.value += 1
+    }
+  })
+}
 
 watch(
   () => props.track.cover_url,
   (coverUrl) => {
+    coverFailed.value = false
     accentBump.value += 1
-    accent.value = resolveCoverColor(coverUrl, () => {
-      accentBump.value += 1
-      accent.value = resolveCoverColor(coverUrl)
-    })
+    // Синхронная гидратация из кэша (без загрузки Image).
+    accent.value = getCachedCoverColor(coverUrl ?? '') ?? null
   },
   { immediate: true },
 )
@@ -77,7 +89,7 @@ const statusTones: Record<TrackStatus, 'accent' | 'success' | 'warning' | 'dange
   cancelled: 'danger',
 }
 
-const isPlayable = computed(() => props.track.status === 'done' && props.track.audio_url !== null)
+const isPlayable = computed(() => props.track.status === 'done' && Boolean(props.track.audio_url))
 
 const isDesktop = useIsDesktop()
 
@@ -88,7 +100,7 @@ const coverActionLabel = computed(() =>
 )
 
 const equalizerAccent = computed(() =>
-  isCurrent ? (player.trackAccent ?? rowAccent.value) : null,
+  isCurrent.value ? (player.trackAccent ?? rowAccent.value) : null,
 )
 
 function handleRowClick(): void {
@@ -106,24 +118,39 @@ function handleRowDoubleClick(): void {
 const rowElement = ref<HTMLElement | null>(null)
 
 // Pointer-based drag&drop: захват handle начинает перенос, отпускание кнопки —
-// завершает (родитель слушает document-level pointerup через событие dragEnd).
+// завершает. Window-listener активен только пока строка реально перетаскивается
+// (isDragging): раньше каждая строка держала постоянный window-listener —
+// N listeners на список срабатывали на любой клик по странице.
+function onWindowPointerUp(): void {
+  emit('dragEnd')
+}
+
 function onHandlePointerDown(event: PointerEvent): void {
   if (!props.draggable || !event.isPrimary) {
     return
+  }
+  // Touch: браузер неявно захватывает pointer источником pointerdown (грипом)
+  // — тогда pointerenter соседних строк не срабатывает, dropIndex не
+  // устанавливается и перестановка не происходит. Снимаем capture, чтобы
+  // события hover-flow доходили до строк под пальцем.
+  const handle = event.currentTarget
+  if (handle instanceof HTMLElement && handle.hasPointerCapture?.(event.pointerId)) {
+    handle.releasePointerCapture(event.pointerId)
   }
   event.preventDefault()
   emit('dragStart')
 }
 
-function onWindowPointerUp(): void {
-  if (props.draggable) {
-    emit('dragEnd')
-  }
-}
-
-onMounted(() => {
-  window.addEventListener('pointerup', onWindowPointerUp)
-})
+watch(
+  () => props.isDragging === true,
+  (isNowDragging, wasDragging) => {
+    if (isNowDragging && !wasDragging) {
+      window.addEventListener('pointerup', onWindowPointerUp)
+    } else if (!isNowDragging && wasDragging) {
+      window.removeEventListener('pointerup', onWindowPointerUp)
+    }
+  },
+)
 
 onUnmounted(() => {
   window.removeEventListener('pointerup', onWindowPointerUp)
@@ -163,12 +190,23 @@ const durationLabel = computed(() => {
       class="track-row__grip"
       aria-hidden="true"
       @pointerdown="onHandlePointerDown"
+      @click.stop
     >
       <AppIcon name="grip" />
     </span>
 
     <div class="track-row__cover" aria-hidden="true">
-      <img v-if="track.cover_url" :src="track.cover_url" alt="" loading="lazy" decoding="async">
+      <!-- @error: битый cover_url не должен оставлять сломанную иконку —
+           скрываем img, взамен отрисовывается SVG-заглушка. -->
+      <img
+        v-if="track.cover_url && !coverFailed"
+        :src="track.cover_url"
+        alt=""
+        loading="lazy"
+        decoding="async"
+        @load="onCoverLoaded"
+        @error="coverFailed = true"
+      >
       <svg v-else viewBox="0 0 24 24" fill="none">
         <path
           d="M9 18V6.5L19 5v11.5"

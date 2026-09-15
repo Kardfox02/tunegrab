@@ -57,6 +57,65 @@ export const useLibraryStore = defineStore('library', () => {
   // дублей tracks.length может навсегда отстать от total.
   const hasMore = computed(() => nextPageCursor.value !== null && nextPageCursor.value < total.value)
 
+  // ── Полный сбор отфильтрованного набора (для «Перемешать и играть») ────
+  const COLLECT_WAVE_SIZE = 6
+  const COLLECT_PAGE_LIMIT = 100
+  const isCollectingAll = ref(false)
+
+  /**
+   * Догружает весь отфильтрованный набор (активный q + сортировка) за один
+   * вызов: последовательный запрос узнаёт total, остальные страницы летят
+   * параллельными волнами (лимит схемы 100 на страницу). Порядок результата
+   * не важен — коллекция предназначена для перемешивания.
+   */
+  async function collectFilteredAll(): Promise<Track[]> {
+    if (isCollectingAll.value) {
+      return []
+    }
+
+    const snapshot: TrackListQuery = {
+      q: query.value.trim() || undefined,
+      sort_by: sortBy.value,
+      order: order.value,
+    }
+    isCollectingAll.value = true
+    try {
+      // Первая страница — ещё и источник истины по total.
+      const first = await listTracks({ ...snapshot, limit: COLLECT_PAGE_LIMIT, offset: 0 })
+      const collected: Track[] = [...first.items]
+      const totalCount = first.total
+
+      const offsets: number[] = []
+      for (let offset = COLLECT_PAGE_LIMIT; offset < totalCount; offset += COLLECT_PAGE_LIMIT) {
+        offsets.push(offset)
+      }
+
+      for (let waveStart = 0; waveStart < offsets.length; waveStart += COLLECT_WAVE_SIZE) {
+        const wave = offsets
+          .slice(waveStart, waveStart + COLLECT_WAVE_SIZE)
+          .map((offset) => listTracks({ ...snapshot, limit: COLLECT_PAGE_LIMIT, offset }))
+        const responses = await Promise.all(wave)
+        for (const response of responses) {
+          collected.push(...response.items)
+        }
+      }
+
+      // Дедупликация по id: параллельные запросы не дублируют данные, но
+      // страховка от race с параллельным mutate списка ничего не стоит.
+      const seen = new Set<number>()
+      const unique: Track[] = []
+      for (const track of collected) {
+        if (!seen.has(track.id)) {
+          seen.add(track.id)
+          unique.push(track)
+        }
+      }
+      return unique
+    } finally {
+      isCollectingAll.value = false
+    }
+  }
+
   const abortGroup = createAbortGroup()
   const extensionAbortGroup = createAbortGroup()
   const nextPageCursor = ref<number | null>(null)
@@ -247,6 +306,8 @@ export const useLibraryStore = defineStore('library', () => {
     deleteError,
     hasMore,
     isQueryEmpty,
+    isCollectingAll,
+    collectFilteredAll,
     load,
     applyRouteQuery,
     loadNextPage,

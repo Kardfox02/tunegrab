@@ -1,5 +1,7 @@
 import axios from 'axios'
 
+import { localizeApiDetail, localizeValidationMessage } from '@/utils/error-messages'
+
 export interface ValidationErrorItem {
   type: string
   loc: Array<string | number>
@@ -74,17 +76,24 @@ export function apiErrorFromAxios(error: unknown): ApiError {
         .filter((item) => item.loc.length > 0)
         .map((item) => [String(item.loc[item.loc.length - 1]), item.msg]),
     )
+    const joined = responseDetail
+      .map((item) => {
+        const field = item.loc.length > 0 ? String(item.loc[item.loc.length - 1]) : ''
+        return localizeValidationMessage(field, item.msg)
+      })
+      .join('. ')
     return new ApiError({
       status,
-      detail: responseDetail.map((item) => item.msg).join('. '),
+      detail: joined,
       fields,
       cause: error,
     })
   }
 
-  const detail = typeof responseDetail === 'string'
+  const rawDetail = typeof responseDetail === 'string'
     ? responseDetail
     : error.message || 'Не удалось выполнить запрос'
+  const detail = localizeApiDetail(rawDetail, status)
 
   return new ApiError({ status, detail, cause: error })
 }

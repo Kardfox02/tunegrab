@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth.store'
+import { PASSWORD_MIN_LENGTH } from '@/utils/password'
 import { isApiError } from '@/types/errors'
 
 const auth = useAuthStore()
@@ -14,6 +15,14 @@ const isSubmitting = ref(false)
 
 async function submit(): Promise<void> {
   errorMessage.value = ''
+
+  // Клиентская проверка до запроса: сервер ответит той же ошибкой, но
+  // мгновенный фидбэк дешевле полного раундтрипа.
+  if (password.value.length < PASSWORD_MIN_LENGTH) {
+    errorMessage.value = `Пароль должен быть не короче ${PASSWORD_MIN_LENGTH} символов.`
+    return
+  }
+
   isSubmitting.value = true
 
   try {

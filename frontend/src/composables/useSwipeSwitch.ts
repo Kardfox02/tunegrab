@@ -18,6 +18,7 @@ export interface UseSwipeSwitchResult {
   onPointerDown: (event: PointerEvent) => void
   onPointerMove: (event: PointerEvent) => void
   onPointerUp: (event: PointerEvent) => void
+  onPointerCancel: (event: PointerEvent) => void
 }
 
 export function useSwipeSwitch(options: UseSwipeSwitchOptions): UseSwipeSwitchResult {
@@ -94,6 +95,19 @@ export function useSwipeSwitch(options: UseSwipeSwitchOptions): UseSwipeSwitchRe
     }
   }
 
+  // Браузер забрал указатель (системный жест, прерванный скролл): жест
+  // завершён без выбора направления — сбрасываем состояние, но свайп НЕ
+  // триггерим. Без этого залипший activePointerId блокировал бы все будущие
+  // свайпы на элементе.
+  function onPointerCancel(event: PointerEvent): void {
+    if (!isDragging.value || event.pointerId !== activePointerId) {
+      return
+    }
+    isDragging.value = false
+    activePointerId = null
+    offsetX.value = 0
+  }
+
   return {
     isDragging,
     offsetX,
@@ -101,5 +115,6 @@ export function useSwipeSwitch(options: UseSwipeSwitchOptions): UseSwipeSwitchRe
     onPointerDown,
     onPointerMove,
     onPointerUp,
+    onPointerCancel,
   }
 }

@@ -13,12 +13,18 @@ import { createPolling, type PollingController } from '@/composables/usePolling'
 import { useAuthStore } from '@/stores/auth.store'
 import { useLibraryStore } from '@/stores/library.store'
 import { useNotificationsStore } from '@/stores/notifications.store'
+import { isApiError } from '@/types/errors'
 import type { Track, TrackStatus } from '@/types/track'
 import type { YouTubeSearchResult } from '@/types/youtube'
 
 export type DownloadUiState = 'idle' | 'queued' | 'exists'
 
 const ACTIVE_STATUSES: readonly TrackStatus[] = ['pending', 'downloading', 'converting', 'finalizing']
+
+// Поллер глохнет после N подряд неудачных запросов статуса: сеть/5xx обычно
+// восстанавливаются быстрее, а «мертвый» трек (404/403) иначе крутил бы
+// бессрочный интервал до самого logout.
+const POLLING_FAILURE_BUDGET = 5
 
 function isActiveStatus(status: TrackStatus): boolean {
   return ACTIVE_STATUSES.includes(status)
@@ -34,6 +40,9 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const generations = new Map<number, number>()
   const pollers = new Map<number, { controller: PollingController; abortGroup: AbortGroup }>()
   let epoch = 0
+  // In-flight мемоизация restore() (паттерн auth.restoreSession) — вместо
+  // булева флага: параллельные вызовы делят один Promise.
+  let restorePromise: Promise<void> | null = null
 
   const activeById = computed(() => {
     const map = new Map<number, Track>()
@@ -95,6 +104,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
     bumpGeneration(trackId)
     const generation = generations.get(trackId)
     const abortGroup = createAbortGroup()
+    let consecutiveFailures = 0
 
     const controller = createPolling(async () => {
       try {
@@ -102,12 +112,30 @@ export const useDownloadsStore = defineStore('downloads', () => {
         if (generation === undefined || generations.get(trackId) !== generation) {
           return
         }
+        consecutiveFailures = 0
         applyTrack(track)
         if (!isActiveStatus(track.status)) {
           stopPolling(trackId)
         }
-      } catch {
-        // Сетевые сбои не останавливают polling — повтор на следующем интервале.
+      } catch (error: unknown) {
+        // Один сбой не останавливает polling — повтор на следующем интервале.
+        // Но исчерпан бюджет failures → трек, вероятно, мертв (404/403 или
+        // длительная сеть): останавливаем, чтобы не тикать вечно до logout.
+        consecutiveFailures += 1
+        if (consecutiveFailures >= POLLING_FAILURE_BUDGET) {
+          stopPolling(trackId)
+          useNotificationsStore().push(
+            'Статус загрузки недоступен — отслеживание остановлено',
+            'warning',
+          )
+          return
+        }
+        const status = isApiError(error) ? error.status : 0
+        if (status >= 400 && status < 500 && status !== 429) {
+          // 4xx (кроме 429 rate-limit) не исправится сам — бюджет не ждём.
+          stopPolling(trackId)
+          return
+        }
       }
     })
 
@@ -168,29 +196,46 @@ export const useDownloadsStore = defineStore('downloads', () => {
   }
 
   async function restore(): Promise<void> {
+    // Мемоизация Promise вместо булева флага: guard'ы роутера при двойной
+    // навигации вызывают restore параллельно — оба прохода пройдут проверку
+    // флага и оба выполнят fetchActiveDownloads(); поздний снапшот затёр бы
+    // треки, поставленные в очередь между ними. Второй вызов теперь просто
+    // дожидается первый Promise.
     if (isRestored.value) {
       return
     }
+    if (restorePromise) {
+      return restorePromise
+    }
 
     const epochAtStart = epoch
+    restorePromise = (async () => {
+      try {
+        const response = await fetchActiveDownloads()
+        if (epoch !== epochAtStart) {
+          return
+        }
+        active.value = response.items.filter((track) => isActiveStatus(track.status))
+        for (const track of active.value) {
+          // После reload результат поиска снова должен считаться «в очереди»,
+          // иначе кнопка возвращается в idle и допускает повторную постановку.
+          youtubeLinks.set(track.youtube_id, { trackId: track.id, exists: false })
+          startPolling(track.id)
+        }
+      } catch {
+        // Ошибка восстановления не блокирует приложение — статусы подтянутся
+        // через /tracks и следующий restore после reset (isRestored=false)
+        // повторит попытку.
+      }
+    })()
+
     try {
-      const response = await fetchActiveDownloads()
-      if (epoch !== epochAtStart) {
-        return
-      }
-      active.value = response.items.filter((track) => isActiveStatus(track.status))
-      for (const track of active.value) {
-        // После reload результат поиска снова должен считаться «в очереди»,
-        // иначе кнопка возвращается в idle и допускает повторную постановку.
-        youtubeLinks.set(track.youtube_id, { trackId: track.id, exists: false })
-        startPolling(track.id)
-      }
-    } catch {
-      // Ошибка восстановления не блокирует приложение — статусы подтянутся через /tracks.
+      await restorePromise
     } finally {
       if (epoch === epochAtStart) {
         isRestored.value = true
       }
+      restorePromise = null
     }
   }
 

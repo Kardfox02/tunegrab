@@ -121,7 +121,8 @@ async def test_add_and_remove_tracks_with_positions(client, db_session):
     assert duplicate.status_code == 409
 
     detail = (await client.get(f"/playlists/{playlist['id']}")).json()
-    assert [t["id"] for t in detail["items"]] == [second.id, first.id]
+    # Prepend-семантика: новый трек встаёт в НАЧАЛО списка.
+    assert [t["id"] for t in detail["items"]] == [first.id, second.id]
 
     removed = await client.delete(
         f"/playlists/{playlist['id']}/tracks/{second.id}", headers=HEADERS
@@ -147,6 +148,23 @@ async def test_add_missing_track_returns_not_found(client, db_session):
         f"/playlists/{playlist['id']}/tracks", json={"track_id": 999}, headers=HEADERS
     )
     assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_added_track_goes_to_top_of_the_list(client, db_session):
+    await register(client)
+    one, two, three = await add_tracks(db_session, "yt-1", "yt-2", "yt-3")
+    playlist = await create_playlist(client)
+
+    for track in (one, two, three):
+        added = await client.post(
+            f"/playlists/{playlist['id']}/tracks", json={"track_id": track.id}, headers=HEADERS
+        )
+        assert added.status_code == 201
+
+    detail = (await client.get(f"/playlists/{playlist['id']}")).json()
+    # Каждый следующий добавленный — в голове списка (LIFO до первого reorder).
+    assert [t["id"] for t in detail["items"]] == [three.id, two.id, one.id]
 
 
 @pytest.mark.anyio
@@ -334,7 +352,8 @@ async def test_coauthor_can_edit_but_not_delete_or_share(client, db_session):
         f"/playlists/{playlist['id']}/tracks", json={"track_id": second.id}, headers=HEADERS
     )
     assert added.status_code == 201
-    assert [t["id"] for t in added.json()["items"]] == [first.id, second.id]
+    # Prepend-семантика: трек, добавленный соавтором, встаёт в голову.
+    assert [t["id"] for t in added.json()["items"]] == [second.id, first.id]
 
     # соавтор переименовывает
     renamed = await client.patch(

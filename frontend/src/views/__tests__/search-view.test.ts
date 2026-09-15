@@ -142,7 +142,7 @@ describe('SearchView', () => {
     await flushPromises()
     const errorBlock = wrapper.findComponent(ErrorState)
     expect(errorBlock.exists()).toBe(true)
-    expect(errorBlock.text()).toContain('Too many search requests')
+    expect(errorBlock.text()).toContain('Слишком много поисковых запросов')
 
     await errorBlock.get('button').trigger('click')
     await flushPromises()
@@ -281,7 +281,7 @@ describe('SearchView', () => {
     const notifications = useNotificationsStore().notifications
     const errorNotification = notifications.find((n) => n.type === 'error')
     expect(errorNotification).toBeDefined()
-    expect(errorNotification?.message).toContain('This track is already in the library')
+    expect(errorNotification?.message).toContain('уже есть в библиотеке')
   })
 
   it('disables the upload button while uploading', async () => {

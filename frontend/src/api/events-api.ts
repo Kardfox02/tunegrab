@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiClient, request } from './client'
 import type { ListenEventPayload, ListeningStats } from '@/types/events'
 
 export async function recordListenEvent(payload: ListenEventPayload): Promise<void> {
@@ -6,8 +6,8 @@ export async function recordListenEvent(payload: ListenEventPayload): Promise<vo
 }
 
 export async function fetchListeningStats(periodDays?: number): Promise<ListeningStats> {
-  const response = await apiClient.get<ListeningStats>('/events/me/stats', {
+  return request<ListeningStats>({
+    url: '/events/me/stats',
     params: periodDays === undefined ? undefined : { period_days: periodDays },
   })
-  return response.data
 }

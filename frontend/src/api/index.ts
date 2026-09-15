@@ -1,6 +1,6 @@
 export { apiClient } from './client'
 export type { AbortGroup, UnauthorizedHandler } from './client'
-export { createAbortGroup, setUnauthorizedHandler } from './client'
+export { createAbortGroup, request, setUnauthorizedHandler } from './client'
 export {
   changePassword,
   getCurrentUser,

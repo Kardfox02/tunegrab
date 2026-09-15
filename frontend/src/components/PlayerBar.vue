@@ -148,7 +148,7 @@ function formatTime(time: number): string {
     @pointerdown="swipe.onPointerDown"
     @pointermove="swipe.onPointerMove"
     @pointerup="swipe.onPointerUp"
-    @pointercancel="swipe.onPointerUp"
+    @pointercancel="swipe.onPointerCancel"
   >
     <audio
       ref="audioElement"

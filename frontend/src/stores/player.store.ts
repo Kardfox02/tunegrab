@@ -340,6 +340,37 @@ let playedTrackIds = new Set<number>()
     playFromList(track, list)
   }
 
+  /** Несмещённый Fisher–Yates: перемешивает копию, исходный массив не трогает. */
+  function shuffledCopy(items: Track[]): Track[] {
+    const copy = [...items]
+    for (let index = copy.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1))
+      const swapped = copy[index]
+      if (swapped === undefined) {
+        continue
+      }
+      copy[index] = copy[swapIndex] as Track
+      copy[swapIndex] = swapped
+    }
+    return copy
+  }
+
+  /**
+   * Одноразовый «Перемешать и играть»: перемешанная копия списка становится
+   * контекстом воспроизведения. Возврат к порядку — любой обычный клик по
+   * треку (playFromList вытесняет контекст целиком).
+   */
+  function playShuffled(list: Track[]): void {
+    const playable = shuffledCopy(list.filter(isPlayable))
+    if (playable.length === 0) {
+      playbackError.value = 'Нет треков для воспроизведения'
+      return
+    }
+
+    const head = playable[0] as Track
+    playFromList(head, playable)
+  }
+
   function play(): void {
     if (!currentTrack.value) {
       return
@@ -670,6 +701,7 @@ let playedTrackIds = new Set<number>()
     setQueueSupplier,
     playFromList,
     playOrToggle,
+    playShuffled,
     reset,
     playTrack,
     play,

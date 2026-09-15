@@ -19,7 +19,9 @@ export class MediaSessionService {
 
   constructor(handlers: MediaSessionHandlers, navigatorApi: Navigator = window.navigator) {
     this.handlers = handlers
-    if (typeof navigatorApi !== 'object' || !('mediaSession' in navigatorApi)) {
+    // typeof null === 'object', поэтому явная проверка на null обязательна:
+    // 'mediaSession' in null бросил бы TypeError.
+    if (navigatorApi === null || typeof navigatorApi !== 'object' || !('mediaSession' in navigatorApi)) {
       this.capabilities = null
       return
     }
@@ -61,6 +63,11 @@ export class MediaSessionService {
     // Safari/WebKit фиксирует состав кнопок системного медиаконтроллера
     // в момент установки metadata — обработчики навешиваем строго раньше.
     this.bindHandlers()
+    // Сборки с mediaSession, но без конструктора MediaMetadata (старый
+    // WebKit): new MediaMetadata упал бы ReferenceError внутри setTrack.
+    if (typeof MediaMetadata === 'undefined') {
+      return
+    }
     this.capabilities.setMetadata(
       new MediaMetadata({
         title: track.title,
@@ -95,6 +102,13 @@ export class MediaSessionService {
 
     this.capabilities.setMetadata(null)
     this.capabilities.setPlaybackState('none')
+    // Снимаем и обработчики: иначе системные кнопки медиаконтроллера
+    // продолжали бы будить «мертвую» сессию после teardown.
+    this.capabilities.setActionHandler('play', null)
+    this.capabilities.setActionHandler('pause', null)
+    this.capabilities.setActionHandler('previoustrack', null)
+    this.capabilities.setActionHandler('nexttrack', null)
+    this.capabilities.setActionHandler('stop', null)
   }
 
   private bindHandlers(): void {

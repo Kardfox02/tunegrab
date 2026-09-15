@@ -59,9 +59,35 @@ describe('auth views', () => {
       global: { plugins: [pinia, router] },
     })
 
+    // Клиентская валидация длины пароля должна пройти, чтобы тест дошёл
+    // до серверной ошибки (проверяется именно ветка ответа API).
+    await wrapper.get('#register-username').setValue('bob')
+    await wrapper.get('#register-password').setValue('valid-password')
     await wrapper.get('form').trigger('submit')
     await wrapper.vm.$nextTick()
 
     expect(wrapper.get('[role="alert"]').text()).toContain('Не удалось создать аккаунт')
+  })
+
+  it('blocks submission client-side when the password is too short', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const auth = useAuthStore()
+    vi.spyOn(auth, 'register').mockResolvedValue({ id: 1, username: 'bob' })
+
+    const router = createTestRouter()
+    await router.push({ name: 'register' })
+    await router.isReady()
+    const wrapper = mount(RegisterView, {
+      global: { plugins: [pinia, router] },
+    })
+
+    await wrapper.get('#register-username').setValue('bob')
+    await wrapper.get('#register-password').setValue('short')
+    await wrapper.get('form').trigger('submit')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('не короче')
+    expect(auth.register).not.toHaveBeenCalled()
   })
 })

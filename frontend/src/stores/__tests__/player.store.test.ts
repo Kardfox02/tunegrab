@@ -850,4 +850,63 @@ describe('player store', () => {
     expect(player.currentTrack?.id).toBe(1)
     expect(controller.load).toHaveBeenLastCalledWith('/stream/1')
   })
+
+  it('shuffles: keeps the exact set of ids, plays one of them, then advances within the shuffled context', () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    const list = [
+      createTrack({ id: 1, audio_url: '/stream/1' }),
+      createTrack({ id: 2, audio_url: '/stream/2' }),
+      createTrack({ id: 3, audio_url: '/stream/3' }),
+      createTrack({ id: 4, audio_url: '/stream/4' }),
+      createTrack({ id: 5, audio_url: '/stream/5' }),
+    ]
+
+    player.playShuffled(list)
+
+    expect(player.currentTrack?.id).not.toBeUndefined()
+    expect([1, 2, 3, 4, 5]).toContain(player.currentTrack?.id)
+
+    // Прогон auto-advance по всему контексту: множество посещённых id должно
+    // совпасть с исходным (перестановка, не усечение).
+    const visited = new Set<number>([player.currentTrack?.id ?? 0])
+    for (let step = 0; step < 10; step += 1) {
+      player.playNext()
+      const id = player.currentTrack?.id
+      if (id === undefined) {
+        break
+      }
+      visited.add(id)
+    }
+
+    expect(visited.size).toBe(5)
+  })
+
+  it('shuffles: filters out non-playable tracks and clears the manual queue', () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    const pending = createTrack({ id: 9, status: 'pending', audio_url: null })
+    const list = [pending, createTrack({ id: 2 }), createTrack({ id: 3 })]
+
+    player.addToQueue(createTrack({ id: 7, audio_url: '/stream/7' }))
+    player.playShuffled(list)
+
+    expect(player.queue).toHaveLength(0)
+    expect([2, 3]).toContain(player.currentTrack?.id)
+  })
+
+  it('shuffles: sets a playback error and does not play on an empty list', () => {
+    const player = usePlayerStore()
+    const controller = createControllerMock()
+    player.bindAudioController(controller)
+
+    player.playShuffled([])
+
+    expect(player.currentTrack).toBeNull()
+    expect(player.playbackError).toBeTruthy()
+  })
 })

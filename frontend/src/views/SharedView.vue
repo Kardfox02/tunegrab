@@ -6,6 +6,8 @@ import { fetchSharedPlaylist } from '@/api/playlists-api'
 import { createAbortGroup } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlaylistsStore } from '@/stores/playlists.store'
+import { isApiError } from '@/types/errors'
+import { formatDuration } from '@/utils/format'
 import type { SharedPlaylist } from '@/types/playlists'
 
 const route = useRoute()
@@ -55,7 +57,12 @@ async function load(): Promise<void> {
     if (auth.initialized && isLoggedIn.value) {
       void subscribe()
     }
-  } catch {
+  } catch (cause: unknown) {
+    // Отменённый запрос (смена token / unmount) — не ошибка загрузки:
+    // запись error здесь навсегда оставляла бы ErrorState поверх данных.
+    if (isApiError(cause) && cause.aborted) {
+      return
+    }
     playlist.value = null
     error.value = 'Плейлист не найден или ссылка была отозвана'
   } finally {
@@ -63,11 +70,29 @@ async function load(): Promise<void> {
   }
 }
 
+// Гонка «load → subscribe»: token мог смениться, пока шёл предыдущий load,
+// или предыдущий subscribe ещё в полёте — защищаемся локальным флагом и
+// сравнением токена до/после await.
+const isSubscribing = ref(false)
+let subscribedToken: string | null = null
+
 async function subscribe(): Promise<void> {
-  if (token.value === null) {
+  if (token.value === null || isSubscribing.value || subscribedToken === token.value) {
     return
   }
-  subscribedPlaylistId.value = await playlists.subscribeByToken(token.value)
+
+  isSubscribing.value = true
+  const tokenAtStart = token.value
+  try {
+    const id = await playlists.subscribeByToken(tokenAtStart)
+    // Токен сменился (уходим на другую ссылку) — результат не актуален.
+    if (tokenAtStart === token.value) {
+      subscribedPlaylistId.value = id
+      subscribedToken = tokenAtStart
+    }
+  } finally {
+    isSubscribing.value = false
+  }
 }
 
 function openPlaylist(): void {
@@ -77,16 +102,6 @@ function openPlaylist(): void {
 }
 
 watch(token, () => void load(), { immediate: true })
-
-function formatDuration(seconds: number | null): string {
-  if (seconds === null) {
-    return '—'
-  }
-  const total = Math.round(seconds)
-  const minutes = Math.floor(total / 60)
-  const secs = String(total % 60).padStart(2, '0')
-  return `${minutes}:${secs}`
-}
 </script>
 
 <template>

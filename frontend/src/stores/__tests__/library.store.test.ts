@@ -416,3 +416,51 @@ describe('library store', () => {
     expect(library.isInitialized).toBe(false)
   })
 })
+
+describe('library store — collectFilteredAll', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    apiClient.defaults.adapter = undefined
+  })
+
+  it('collects all pages in waves and dedupes by id', async () => {
+    setActivePinia(createPinia())
+    const libraryStore = useLibraryStore()
+    libraryStore.applyRouteQuery({ q: 'rock' })
+
+    const allFixture: Track[] = []
+    for (let i = 0; i < 120; i += 1) {
+      allFixture.push(createTrack({ id: i + 1, title: `t${i + 1}` }))
+    }
+    const requestsPerCall = { count: 0 }
+    apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
+      requestsPerCall.count += 1
+      const offset = Number(config.params?.offset ?? 0)
+      const limit = Number(config.params?.limit ?? 50)
+      return {
+        data: { items: allFixture.slice(offset, offset + limit), total: 120, limit, offset },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    const all = await libraryStore.collectFilteredAll()
+    expect(all).toHaveLength(120)
+    expect(requestsPerCall.count).toBeGreaterThanOrEqual(2)
+    expect(new Set(all.map((track) => track.id)).size).toBe(120)
+  })
+
+  it('propagates an error wave and does not swallow it', async () => {
+    setActivePinia(createPinia())
+    apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
+      throw errorResponse(500, 'boom', config)
+    }
+    const libraryStore = useLibraryStore()
+    await expect(libraryStore.collectFilteredAll()).rejects.toThrow()
+  })
+})

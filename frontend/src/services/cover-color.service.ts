@@ -1,16 +1,45 @@
 const cache = new Map<string, string>()
 const pending = new Map<string, Promise<string | null>>()
 
+// LRU-лимит: кэш ключей — это URL обложек, за долгую сессию с сотнями треков
+// и циклами поллинга Map растёт монотонно. Значение — Sentinel «извлечение
+// невозможно» для негативного кэша: битый URL / tainted canvas не должен
+// перезагружать и парсить картинку заново на каждый ремонт строки.
+const CACHE_LIMIT = 500
+const NEGATIVE = ''
+
 const SAMPLE_SIZE = 32
 
+function rememberCache(url: string, color: string): void {
+  // LRU через переезд ключа в конец Map: Map сохраняет порядок вставки,
+  // итерация с головы — самые «старые» записи.
+  cache.delete(url)
+  cache.set(url, color)
+
+  while (cache.size > CACHE_LIMIT) {
+    const oldest = cache.keys().next()
+    if (oldest.done) {
+      break
+    }
+    cache.delete(oldest.value)
+  }
+}
+
 export function getCachedCoverColor(url: string): string | null {
-  return cache.get(url) ?? null
+  const color = cache.get(url)
+  if (color === undefined) {
+    return null
+  }
+  // Переезд в конец — «недавно использованные» живут дольше.
+  cache.delete(url)
+  cache.set(url, color)
+  return color === NEGATIVE ? null : color
 }
 
 export function getCoverAccentColor(url: string): Promise<string | null> {
   const cached = cache.get(url)
-  if (cached) {
-    return Promise.resolve(cached)
+  if (cached !== undefined) {
+    return Promise.resolve(cached === NEGATIVE ? null : cached)
   }
 
   const inFlight = pending.get(url)
@@ -20,9 +49,7 @@ export function getCoverAccentColor(url: string): Promise<string | null> {
 
   const promise = extractColor(url)
     .then((color) => {
-      if (color) {
-        cache.set(url, color)
-      }
+      rememberCache(url, color ?? NEGATIVE)
       return color
     })
     .finally(() => {
@@ -40,8 +67,9 @@ export function resolveCoverColor(url: string | null, onReady?: (color: string |
   }
 
   const cached = cache.get(url)
-  if (cached) {
-    return cached
+  if (cached !== undefined) {
+    // Sentinel «извлечение невозможно» не запускает повторную попытку.
+    return cached === NEGATIVE ? null : cached
   }
 
   void getCoverAccentColor(url).then((color) => {

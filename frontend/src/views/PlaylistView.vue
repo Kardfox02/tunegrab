@@ -22,6 +22,10 @@ const playlists = usePlaylistsStore()
 const player = usePlayerStore()
 const profile = useProfileStore()
 
+// Константный пустой массив для «не удаляется» в TrackList: литерал `[]` в
+// шаблоне создаёт новый массив на каждый рендер и роняет мемоизацию пропов.
+const NO_DELETING_IDS: number[] = []
+
 const playlistId = computed(() => {
   const raw = route.params.id
   const id = typeof raw === 'string' ? Number(raw) : Number.NaN
@@ -71,7 +75,8 @@ async function loadPickerPage(): Promise<void> {
     return pickerNextPagePromise.current
   }
 
-  const request = (async () => {
+  let request: Promise<void> = Promise.resolve()
+  request = (async () => {
     isLoadingPickerPage.value = true
     try {
       const query = pickerQuery.value.trim()
@@ -97,7 +102,7 @@ async function loadPickerPage(): Promise<void> {
         ...inPlaylistIds.value,
       ])
       const fresh = response.items.filter((track) => !knownIds.has(track.id))
-      pickerResults.value = [...pickerResults.value, ...fresh]
+      pickerResults.value.push(...fresh)
       pickerCursor.value += response.items.length
       pickerTotal.value = response.total
       pickerError.value = null
@@ -108,7 +113,9 @@ async function loadPickerPage(): Promise<void> {
       pickerError.value = isApiError(error) ? error.detail : 'Не удалось загрузить треки'
     } finally {
       isLoadingPickerPage.value = false
-      pickerNextPagePromise.current = null
+      if (pickerNextPagePromise.current === request) {
+        pickerNextPagePromise.current = null
+      }
     }
   })()
 
@@ -117,7 +124,13 @@ async function loadPickerPage(): Promise<void> {
 }
 
 function runPickerSearch(): void {
-  // Новый поиск: гасим догрузку, сбрасываем курсор и грузим первую партию.
+  // Новый поиск сбрасывает состояние, но in-flight запрос предыдущего поиска
+  // мог ещё лететь: его ранний `return` по isLoadingPickerPage вернул бы
+  // Promise старого запроса, а его ответ (без aborted-проверки) дописался бы
+  // в сброшенный список. Абортим — старый ответ отбрасывается корректно.
+  pickerAbortGroup.nextSignal()
+  isLoadingPickerPage.value = false
+  pickerNextPagePromise.current = null
   pickerCursor.value = 0
   pickerTotal.value = 0
   pickerResults.value = []
@@ -191,6 +204,10 @@ const AUTO_SCROLL_EDGE = 80
 const AUTO_SCROLL_MAX_SPEED = 14
 
 let autoScrollPointerY = 0
+// Жест начинается с pointerdown, но реальные координаты приходят только с
+// первым pointermove. Пока их нет — автоскролл «спит»: нулевая координата
+// ложится в верхнюю кромку и давал бы рывок списка вверх в начале drag.
+let autoScrollHasSample = false
 let autoScrollRaf: number | null = null
 
 function autoScrollStep(): void {
@@ -199,14 +216,16 @@ function autoScrollStep(): void {
     return
   }
 
-  const edgeBottom = window.innerHeight - AUTO_SCROLL_EDGE
   let speed = 0
-  if (autoScrollPointerY < AUTO_SCROLL_EDGE) {
-    // Чем ближе к краю — тем быстрее (1 у границы зоны, MAX у самого края).
-    speed = -Math.round(AUTO_SCROLL_MAX_SPEED * (1 - autoScrollPointerY / AUTO_SCROLL_EDGE) + 1)
-  } else if (autoScrollPointerY > edgeBottom) {
-    const depth = (autoScrollPointerY - edgeBottom) / AUTO_SCROLL_EDGE
-    speed = Math.round(AUTO_SCROLL_MAX_SPEED * depth + 1)
+  if (autoScrollHasSample) {
+    const edgeBottom = window.innerHeight - AUTO_SCROLL_EDGE
+    if (autoScrollPointerY < AUTO_SCROLL_EDGE) {
+      // Чем ближе к краю — тем быстрее (1 у границы зоны, MAX у самого края).
+      speed = -Math.round(AUTO_SCROLL_MAX_SPEED * (1 - autoScrollPointerY / AUTO_SCROLL_EDGE) + 1)
+    } else if (autoScrollPointerY > edgeBottom) {
+      const depth = (autoScrollPointerY - edgeBottom) / AUTO_SCROLL_EDGE
+      speed = Math.round(AUTO_SCROLL_MAX_SPEED * depth + 1)
+    }
   }
 
   if (speed !== 0) {
@@ -217,11 +236,24 @@ function autoScrollStep(): void {
 
 function onDragPointerMove(event: PointerEvent): void {
   autoScrollPointerY = event.clientY
+  autoScrollHasSample = true
+
+  // Deterministic hit-test: у тач-указателей события не ретаргетятся, а
+  // pointerenter соседних строк блокируется неявным pointer capture —
+  // поэтому «над какой строкой палец» узнаём напрямую, по координатам.
+  const target = document.elementFromPoint(event.clientX, event.clientY)
+  const indexAttr = target?.closest('li[data-drag-index]')?.getAttribute('data-drag-index')
+  const index = Number(indexAttr)
+  if (indexAttr !== null && indexAttr !== undefined && Number.isFinite(index)) {
+    onRowDragOver(index)
+  }
 }
 
 function startAutoScrollTracking(): void {
   autoScrollPointerY = 0
+  autoScrollHasSample = false
   document.addEventListener('pointermove', onDragPointerMove)
+  document.addEventListener('pointercancel', onDragPointerCancel)
   if (autoScrollRaf === null) {
     autoScrollRaf = window.requestAnimationFrame(autoScrollStep)
   }
@@ -229,10 +261,19 @@ function startAutoScrollTracking(): void {
 
 function stopAutoScrollTracking(): void {
   document.removeEventListener('pointermove', onDragPointerMove)
+  document.removeEventListener('pointercancel', onDragPointerCancel)
   if (autoScrollRaf !== null) {
     window.cancelAnimationFrame(autoScrollRaf)
     autoScrollRaf = null
   }
+}
+
+// Системная отмена жеста (входящий звонок, системный свайп): pointerup не
+// приходит, и drag Index/RAF-цикл зависали до ухода со страницы.
+function onDragPointerCancel(): void {
+  dragIndex.value = null
+  dropIndex.value = null
+  stopAutoScrollTracking()
 }
 
 function onRowDragStart(index: number): void {
@@ -264,7 +305,11 @@ async function onRowDragEnd(): Promise<void> {
     return
   }
   items.splice(to, 0, moved)
-  await playlists.reorder(playlistId.value ?? 0, items)
+
+  if (playlistId.value === null) {
+    return
+  }
+  void playlists.reorder(playlistId.value, items)
 }
 
 onUnmounted(stopAutoScrollTracking)
@@ -322,6 +367,10 @@ onUnmounted(() => {
 
 function playFromPlaylist(track: Track): void {
   player.playOrToggle(track, playlists.detailTracks)
+}
+
+function shufflePlaylist(): void {
+  player.playShuffled(playlists.detailTracks)
 }
 
 function removeTrackFromPlaylist(track: Track): void {
@@ -398,6 +447,16 @@ watch(
         </div>
       </div>
       <div class="playlist-view__header-actions">
+        <button
+          class="icon-btn"
+          type="button"
+          aria-label="Перемешать и играть"
+          :disabled="playlists.detailTracks.length === 0"
+          @click="shufflePlaylist"
+        >
+          <AppIcon name="shuffle" />
+          <span>Перемешать</span>
+        </button>
         <button class="btn btn-secondary" type="button" @click="renamePlaylist">Переименовать</button>
         <button
           v-if="!isOwner"
@@ -412,9 +471,16 @@ watch(
 
     <LoadingState v-if="playlists.isDetailLoading && !playlists.detail" message="Загружаем плейлист…" />
 
+    <!-- Невалидный :id (NaN / 0 / отрицательное): раньше страница молчала —
+         ни Loading, ни Error не рисовались. Явное состояние «не найден». -->
+    <ErrorState
+      v-else-if="playlistId === null"
+      message="Плейлист не найден"
+    />
+
     <ErrorState
       v-else-if="playlists.detailError"
-      :message="playlists.detailError"
+      :message="playlists.detailError || undefined"
       @retry="playlistId !== null && playlists.loadDetail(playlistId, true)"
     />
 
@@ -505,7 +571,7 @@ watch(
       <TrackList
         v-else
         :tracks="playlists.detailTracks"
-        :deleting-ids="[]"
+        :deleting-ids="NO_DELETING_IDS"
         :delete-error="null"
         :current-track-id="player.currentTrack?.id ?? null"
         :is-playing="player.isPlaying"
@@ -520,7 +586,6 @@ watch(
         @remove="removeTrackFromPlaylist"
         @toggle-like="(track) => profile.toggleLike(track)"
         @drag-start="onRowDragStart"
-        @drag-over-row="onRowDragOver"
         @drag-end="onRowDragEnd"
       />
     </template>

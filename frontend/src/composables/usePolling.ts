@@ -54,6 +54,9 @@ export function createPolling(task: () => Promise<void>, options: PollingOptions
     runningTask = true
     try {
       await task()
+    } catch {
+      // Ошибки задач (сеть/404) не должны улетать как unhandled rejection:
+      // тик завершён, следующий тик произойдёт по расписанию.
     } finally {
       runningTask = false
       scheduleNext()

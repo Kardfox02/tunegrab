@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, watch, type Ref } from 'vue'
+import { computed, onMounted, onUnmounted, watch, type Ref } from 'vue'
 
 export interface UseInfiniteScrollOptions {
   /** Элемент-сентинел в конце списка; пересечение = пора догружать. */
@@ -34,6 +34,36 @@ export function useInfiniteScroll(options: UseInfiniteScrollOptions): void {
     observer?.disconnect()
     observer = null
   }
+
+  // Сентинел мог остаться пересекающимся на момент, когда isDisabled() был
+  // true (событие пересечения пришло во время загрузки и было отброшено).
+  // Проверяем геометрию вручную: если он действительно в вьюпорте — вызываем
+  // onIntersect, иначе список перестаёт догружаться до пересборки DOM.
+  function checkStillIntersecting(): void {
+    const target = options.target.value
+    if (!target || observer === null || !shouldLoad()) {
+      return
+    }
+    const bounds = target.getBoundingClientRect()
+    if (bounds.top < window.innerHeight + 200 && bounds.bottom > -200) {
+      options.onIntersect()
+    }
+  }
+
+  // Отслеживаем выход из блокировки (реактивные зависимости isDisabled
+  // читаются внутри watcher'а): в момент разблокировки сентинел мог всё ещё
+  // физически находиться в вьюпорте — IntersectionObserver не пришлёт новое
+  // событие, и список навсегда остановился бы. Ручная проверка геометрии
+  // закрывает эту гонку догрузки.
+  const isDisabledTrigger = computed(() => options.isDisabled())
+  watch(
+    isDisabledTrigger,
+    (isNowDisabled, wasPreviouslyDisabled) => {
+      if (wasPreviouslyDisabled && !isNowDisabled) {
+        checkStillIntersecting()
+      }
+    },
+  )
 
   watch(() => options.target.value, observeTarget)
 

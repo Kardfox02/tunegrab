@@ -39,21 +39,34 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   const hasPlaylists = computed(() => playlists.value.length > 0)
   const detailTracks = computed<Track[]>(() => detail.value?.items ?? [])
 
+  // Epoch: каждый reset() (logout) инкрементирует счётчик; async-методы
+  // захватывают значение до await и проверяют после — ответ, пришедший после
+  // сброса состояния, не попадает в данные новой (или анонимной) сессии.
+  let dataEpoch = 0
+
   async function load(force = false): Promise<void> {
     if (isLoaded.value && !force) {
       return
     }
 
+    const epochAtStart = dataEpoch
     isLoading.value = true
     listError.value = null
     try {
       const response = await fetchPlaylists()
+      if (epochAtStart !== dataEpoch) {
+        return
+      }
       playlists.value = response.items
       isLoaded.value = true
     } catch {
-      listError.value = 'Не удалось загрузить плейлисты'
+      if (epochAtStart === dataEpoch) {
+        listError.value = 'Не удалось загрузить плейлисты'
+      }
     } finally {
-      isLoading.value = false
+      if (epochAtStart === dataEpoch) {
+        isLoading.value = false
+      }
     }
   }
 
@@ -62,14 +75,31 @@ export const usePlaylistsStore = defineStore('playlists', () => {
       return
     }
 
+    const epochAtStart = dataEpoch
     isDetailLoading.value = true
     detailError.value = null
     try {
-      detail.value = await fetchPlaylist(id)
+      const fetched = await fetchPlaylist(id)
+      // Гонка A→B: быстрый переход между плейлистами — поздний ответ A не
+      // должен затирать detail под URL B.
+      if (epochAtStart !== dataEpoch) {
+        return
+      }
+      detail.value = fetched
     } catch {
+      // Тот же epoch-принцип + «старый» detail остаётся валидным для своего
+      // id: ошибка не должна рисоваться поверх чужого контента.
+      if (epochAtStart !== dataEpoch) {
+        return
+      }
       detailError.value = 'Не удалось загрузить плейлист'
+      if (detail.value?.id !== id) {
+        detail.value = null
+      }
     } finally {
-      isDetailLoading.value = false
+      if (epochAtStart === dataEpoch) {
+        isDetailLoading.value = false
+      }
     }
   }
 
@@ -160,6 +190,7 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     }
 
     const previousItems = previous.items
+    const epochAtStart = dataEpoch
     detail.value = { ...previous, items: orderedTracks }
 
     try {
@@ -167,10 +198,20 @@ export const usePlaylistsStore = defineStore('playlists', () => {
         playlistId,
         orderedTracks.map((track) => track.id),
       )
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       detail.value = updated
       return true
     } catch {
-      detail.value = { ...previous, items: previousItems }
+      if (epochAtStart !== dataEpoch) {
+        return false
+      }
+      // Откатываем ТОЛЬКО порядок: конкурентные rename/share, успевшие
+      // завершиться во время await, вместе с порядком откатываться не должны.
+      if (detail.value?.id === playlistId) {
+        detail.value = { ...detail.value, items: previousItems }
+      }
       notifications.push('Не удалось изменить порядок', 'error')
       return false
     }
@@ -241,6 +282,9 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   function reset(): void {
+    // Важно ДО очистки: in-flight запросы захватили epoch и, увидев расхождение,
+    // отбросят свои ответы (late-response не resurrects удалённые данные).
+    dataEpoch += 1
     playlists.value = []
     detail.value = null
     isLoading.value = false

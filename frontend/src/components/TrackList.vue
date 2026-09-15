@@ -24,7 +24,6 @@ const emit = defineEmits<{
   toggleLike: [track: Track]
   addToPlaylist: [track: Track]
   dragStart: [index: number]
-  dragOverRow: [index: number]
   dragEnd: []
 }>()
 </script>
@@ -52,7 +51,7 @@ const emit = defineEmits<{
       @toggle-like="emit('toggleLike', track)"
       @add-to-playlist="emit('addToPlaylist', track)"
       @drag-start="emit('dragStart', index)"
-      @pointerenter="dragIndex !== null && emit('dragOverRow', index)"
+      :data-drag-index="index"
       @drag-end="emit('dragEnd')"
     />
   </ul>

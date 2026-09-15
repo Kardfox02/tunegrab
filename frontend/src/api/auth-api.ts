@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiClient, request } from './client'
 import type {
   AuthResponse,
   ChangePasswordPayload,
@@ -7,18 +7,15 @@ import type {
 } from '@/types/auth'
 
 export async function getCurrentUser(): Promise<User> {
-  const response = await apiClient.get<User>('/auth/me')
-  return response.data
+  return request<User>({ url: '/auth/me' })
 }
 
 export async function login(credentials: CredentialsPayload): Promise<AuthResponse> {
-  const response = await apiClient.post<AuthResponse>('/auth/login', credentials)
-  return response.data
+  return request<AuthResponse>({ url: '/auth/login', method: 'post', data: credentials })
 }
 
 export async function register(credentials: CredentialsPayload): Promise<AuthResponse> {
-  const response = await apiClient.post<AuthResponse>('/auth/register', credentials)
-  return response.data
+  return request<AuthResponse>({ url: '/auth/register', method: 'post', data: credentials })
 }
 
 export async function logout(): Promise<void> {
@@ -26,6 +23,5 @@ export async function logout(): Promise<void> {
 }
 
 export async function changePassword(payload: ChangePasswordPayload): Promise<AuthResponse> {
-  const response = await apiClient.post<AuthResponse>('/auth/change-password', payload)
-  return response.data
+  return request<AuthResponse>({ url: '/auth/change-password', method: 'post', data: payload })
 }

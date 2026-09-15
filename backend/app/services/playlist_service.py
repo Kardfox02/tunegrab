@@ -166,15 +166,21 @@ class PlaylistService:
         if track is None:
             raise TrackNotFoundError
 
-        max_position = await session.scalar(
-            select(func.max(PlaylistTrack.position)).where(
+        # Новый трек добавляется в НАЧАЛО списка: min − 1. Номера могут
+        # уходить в минус при повторных добавлениях — относительный порядок
+        # корректен, а «здоровье» позиций восстанавливает _compact_positions
+        # при первом же remove/set_order. NB: min может быть и NULL (пустой
+        # плейлист), и 0 — проверяем именно на None, `or` тут ошибочен.
+        min_position = await session.scalar(
+            select(func.min(PlaylistTrack.position)).where(
                 PlaylistTrack.playlist_id == playlist_id
             )
         )
+        head_position = 0 if min_position is None else min_position - 1
         link = PlaylistTrack(
             playlist_id=playlist_id,
             track_id=track_id,
-            position=(max_position or 0) + 1,
+            position=head_position,
         )
         session.add(link)
         try:

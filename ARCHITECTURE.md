@@ -230,7 +230,7 @@ Endpoint не изменяет записи и не запускает загр�
   - **Матрица прав**: чтение и редактирование (rename, треки, порядок) — автор **и подписчики**; удаление плейлиста и share-операции — **только автор** (`PlaylistNotOwnedError` → **403**); отписка — только подписчик (автору своя — 403). Посторонний без подписки → 404 (маскировка существования).
   - `GET /playlists` (свои + подписные, каждый с `owner_username` и `is_owner`), `POST /playlists {name ≤200}` → 201;
   - `GET /playlists/{id}` (detail: треки по position ASC, `owner_username`, `is_owner`), `PATCH` (rename), `DELETE` → 204 (каскад: tracks + access);
-  - `POST /playlists/{id}/tracks {track_id}` → 201 + detail; дубль → 409; нет трека → 404; позиция = max+1;
+  - `POST /playlists/{id}/tracks {track_id}` → 201 + detail; дубль → 409; нет трека → 404; **позиция = min−1** — новый трек встаёт в начало списка (prepend), отрицательные/нулевые позиции корректны: относительный порядок важнее абсолютных значений, компактизацию выполняет `_compact_positions`;
   - `DELETE /playlists/{id}/tracks/{track_id}` → 204 + компактизация позиций; нет связи → 404;
   - `PUT /playlists/{id}/tracks/order {track_ids}` → 200; состав не совпал → **409**;
   - `POST /playlists/{id}/share` → `{share_url}` (создание/ротация uuid4-токена; только автор), `DELETE .../share` → 204 (отзыв);

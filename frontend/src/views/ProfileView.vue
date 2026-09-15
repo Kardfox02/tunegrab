@@ -9,7 +9,9 @@ import AddToPlaylistPopover from '@/components/AddToPlaylistPopover.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { createPolling } from '@/composables/usePolling'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { useAddToPlaylistPopover } from '@/composables/useAddToPlaylistPopover'
 import { useAuthStore } from '@/stores/auth.store'
+import { useNotificationsStore } from '@/stores/notifications.store'
 import { usePlayerStore } from '@/stores/player.store'
 import { usePlaylistsStore } from '@/stores/playlists.store'
 import { useProfileStore } from '@/stores/profile.store'
@@ -19,9 +21,14 @@ import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
 const player = usePlayerStore()
+const notifications = useNotificationsStore()
 const profile = useProfileStore()
 const playlists = usePlaylistsStore()
 const router = useRouter()
+
+// Константный пустой массив для «не удаляется» в TrackList: литерал `[]` в
+// шаблоне создаёт новый массив на каждый рендер и роняет мемоизацию пропов.
+const NO_DELETING_IDS: number[] = []
 
 // Период статистики: 24 часа / 7 дней / 30 дней. Выбранный период держим
 // локально — он влияет и на ручное обновление, и на поллинг.
@@ -94,6 +101,16 @@ function playFromLikes(track: Track): void {
   player.playOrToggle(track, profile.likedTracks)
 }
 
+async function shuffleLikes(): Promise<void> {
+  try {
+    // Догружаем ВСЕ лайки (за пределами уже загруженных партий) и перемешиваем.
+    const allLikes = await profile.collectAllLikes()
+    player.playShuffled(allLikes)
+  } catch {
+    notifications.push('Не удалось собрать треки для перемешивания', 'error')
+  }
+}
+
 function toggleLike(track: Track): void {
   void profile.toggleLike(track)
 }
@@ -107,16 +124,8 @@ function removeFromLikes(track: Track): void {
 
 // ── Поповер «Добавить в плейлист» (секция «Любимое») ────────────────────────
 
-const addToPlaylistTrack = ref<Track | null>(null)
-
-async function choosePlaylist(playlistId: number): Promise<void> {
-  const track = addToPlaylistTrack.value
-  if (!track) {
-    return
-  }
-  addToPlaylistTrack.value = null
-  await playlists.addTrack(playlistId, track.id)
-}
+const { track: popoverTrack, open: openPopover, close: closePopover, choose: choosePlaylist } =
+  useAddToPlaylistPopover()
 
 function openPlaylist(id: number): void {
   void router.push({ name: 'playlist', params: { id: String(id) } })
@@ -291,11 +300,23 @@ useInfiniteScroll({
       </template>
     </section>
 
-    <section class="card settings-section" aria-labelledby="settings-likes">
-      <h2 id="settings-likes" class="settings-section__title">
-        Любимое •
-        <span v-if="profile.likesTotal > 0" class="settings-section__counter">{{ profile.likesTotal }}</span>
-      </h2>
+    <section class="settings-section settings-section--flush" aria-labelledby="settings-likes">
+      <div class="settings-section__header">
+        <h2 id="settings-likes" class="settings-section__title">
+          Любимое •
+          <span v-if="profile.likesTotal > 0" class="settings-section__counter">{{ profile.likesTotal }}</span>
+        </h2>
+        <button
+          class="icon-btn"
+          type="button"
+          aria-label="Перемешать и играть"
+          :disabled="profile.likesTotal === 0 || profile.isCollectingLikes"
+          @click="shuffleLikes"
+        >
+          <AppIcon name="shuffle" />
+          <span>Перемешать</span>
+        </button>
+      </div>
 
       <LoadingState v-if="profile.isLoadingLikes && profile.likedTracks.length === 0" message="Загружаем любимые треки…" />
 
@@ -308,7 +329,7 @@ useInfiniteScroll({
       <template v-else-if="profile.hasLikes">
         <TrackList
           :tracks="profile.likedTracks"
-          :deleting-ids="[]"
+          :deleting-ids="NO_DELETING_IDS"
           :delete-error="null"
           :current-track-id="player.currentTrack?.id ?? null"
           :is-playing="player.isPlaying"
@@ -318,7 +339,7 @@ useInfiniteScroll({
           @play="playFromLikes"
           @remove="removeFromLikes"
           @toggle-like="toggleLike"
-          @add-to-playlist="(track) => (addToPlaylistTrack = track)"
+          @add-to-playlist="(track) => openPopover(track)"
         />
 
         <div
@@ -341,9 +362,9 @@ useInfiniteScroll({
     </section>
 
     <AddToPlaylistPopover
-      v-if="addToPlaylistTrack"
-      :track="addToPlaylistTrack"
-      @close="addToPlaylistTrack = null"
+      v-if="popoverTrack"
+      :track="popoverTrack"
+      @close="closePopover"
       @add="choosePlaylist"
     />
   </div>

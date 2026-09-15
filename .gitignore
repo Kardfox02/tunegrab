@@ -24,6 +24,9 @@ tunnel.sh
 
 # --- Личные планы и заметки (инфраструктура, адреса) ---
 PLANS.md
+DEPLOY.md
+scripts/*
+infra/*
 
 # --- Логи ---
 backend/logs/

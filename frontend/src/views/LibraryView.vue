@@ -7,18 +7,23 @@ import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import TrackList from '@/components/TrackList.vue'
 import AddToPlaylistPopover from '@/components/AddToPlaylistPopover.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import { useDownloadsStore } from '@/stores/downloads.store'
 import { useLibraryStore } from '@/stores/library.store'
+import { useNotificationsStore } from '@/stores/notifications.store'
 import { usePlayerStore } from '@/stores/player.store'
 import { usePlaylistsStore } from '@/stores/playlists.store'
 import { useProfileStore } from '@/stores/profile.store'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { useAddToPlaylistPopover } from '@/composables/useAddToPlaylistPopover'
+import { formatTrackCount } from '@/utils/plural'
 import type { Track, TrackSortField, TrackSortOrder } from '@/types/track'
 
 const route = useRoute()
 const router = useRouter()
 const library = useLibraryStore()
 const player = usePlayerStore()
+const notifications = useNotificationsStore()
 const downloads = useDownloadsStore()
 const profile = useProfileStore()
 const playlists = usePlaylistsStore()
@@ -113,6 +118,17 @@ function play(track: Track): void {
   player.playOrToggle(track, library.tracks)
 }
 
+async function shuffleLibrary(): Promise<void> {
+  // Шаффлит отфильтрованный набор (активный поиск + сортировка), с догрузкой
+  // всех страниц свыше первых 50. Ошибка сбора — playback не стартует.
+  try {
+    const allTracks = await library.collectFilteredAll()
+    player.playShuffled(allTracks)
+  } catch {
+    notifications.push('Не удалось собрать треки для перемешивания', 'error')
+  }
+}
+
 function remove(track: Track): void {
   void library.removeTrack(track.id)
 }
@@ -123,18 +139,10 @@ function toggleLike(track: Track): void {
 
 // ── Поповер «Добавить в плейлист» ───────────────────────────────────────────
 
-const addToPlaylistTrack = ref<Track | null>(null)
+const { track: popoverTrack, open: openPopover, close: closePopover, choose: choosePlaylist } =
+  useAddToPlaylistPopover()
 
 void playlists.load()
-
-async function choosePlaylist(playlistId: number): Promise<void> {
-  const track = addToPlaylistTrack.value
-  if (!track) {
-    return
-  }
-  addToPlaylistTrack.value = null
-  await playlists.addTrack(playlistId, track.id)
-}
 
 function loadMore(): void {
   void library.loadNextPage()
@@ -149,18 +157,7 @@ useInfiniteScroll({
     !library.isInitialized || library.isLoading || !library.hasMore || library.isLoadingNextPage,
 })
 
-const counterLabel = computed(() => {
-  const count = library.total
-  const lastDigit = count % 10
-  const lastTwoDigits = count % 100
-  if (lastDigit === 1 && lastTwoDigits !== 11) {
-    return `${count} трек`
-  }
-  if (lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14)) {
-    return `${count} трека`
-  }
-  return `${count} треков`
-})
+const counterLabel = computed(() => formatTrackCount(library.total))
 </script>
 
 <template>
@@ -170,6 +167,16 @@ const counterLabel = computed(() => {
         <h1>Библиотека</h1>
         <p class="library-view__counter">{{ counterLabel }}</p>
       </div>
+      <button
+        class="icon-btn"
+        type="button"
+        aria-label="Перемешать и играть"
+        :disabled="library.isCollectingAll || library.total === 0"
+        @click="shuffleLibrary"
+      >
+        <AppIcon name="shuffle" />
+        <span>Перемешать</span>
+      </button>
     </div>
 
     <div class="search-field">
@@ -240,13 +247,13 @@ const counterLabel = computed(() => {
         @play="play"
         @remove="remove"
         @toggle-like="toggleLike"
-        @add-to-playlist="(track) => (addToPlaylistTrack = track)"
+        @add-to-playlist="(track) => openPopover(track)"
       />
 
       <AddToPlaylistPopover
-        v-if="addToPlaylistTrack"
-        :track="addToPlaylistTrack"
-        @close="addToPlaylistTrack = null"
+        v-if="popoverTrack"
+        :track="popoverTrack"
+        @close="closePopover"
         @add="choosePlaylist"
       />
 

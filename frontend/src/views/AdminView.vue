@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import StorageDonutChart from '@/components/StorageDonutChart.vue'
+import StorageBarChart from '@/components/StorageBarChart.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import { changePassword } from '@/api/auth-api'
@@ -13,6 +13,8 @@ import {
 } from '@/api/admin-api'
 import { useAuthStore } from '@/stores/auth.store'
 import { useNotificationsStore } from '@/stores/notifications.store'
+import { formatBytes } from '@/utils/format'
+import { PASSWORD_MIN_LENGTH } from '@/utils/password'
 import { isApiError } from '@/types/errors'
 import type {
   AdminHealth,
@@ -32,7 +34,6 @@ const newPassword = ref('')
 const repeatedPassword = ref('')
 const passwordError = ref('')
 const isChangingPassword = ref(false)
-const PASSWORD_MIN_LENGTH = 8
 
 async function submitPasswordChange(): Promise<void> {
   passwordError.value = ''
@@ -109,20 +110,6 @@ const verifyResult = ref<VerifyStorageResponse | null>(null)
 const cleanupResult = ref<CleanupOrphansResponse | null>(null)
 const thumbnailsResult = ref<{ deleted: number; freed: string } | null>(null)
 const busyCommand = ref<'verify' | 'cleanup' | 'thumbnails' | null>(null)
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} Б`
-  }
-  const units = ['КБ', 'МБ', 'ГБ', 'ТБ']
-  let value = bytes
-  let unitIndex = -1
-  do {
-    value /= 1024
-    unitIndex += 1
-  } while (value >= 1024 && unitIndex < units.length - 1)
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIndex]}`
-}
 
 async function executeVerifyStorage(): Promise<void> {
   busyCommand.value = 'verify'
@@ -202,17 +189,20 @@ onMounted(() => {
     </div>
 
     <section class="card settings-section" aria-labelledby="admin-account">
-      <button
-        id="admin-account"
-        type="button"
-        class="admin-toggle"
-        :aria-expanded="isPasswordFormOpen"
-        aria-controls="admin-password-form"
-        @click="isPasswordFormOpen = !isPasswordFormOpen"
-      >
-        <h2 class="settings-section__title">Аккаунт</h2>
-        <span class="admin-toggle__chevron" :class="{ 'admin-toggle__chevron--open': isPasswordFormOpen }" aria-hidden="true"></span>
-      </button>
+      <!-- h2 снаружи, кнопка внутри: button не может содержать heading
+           (invalid content model ломает navigating by headings у screenreader). -->
+      <h2 id="admin-account" class="settings-section__title">
+        <button
+          type="button"
+          class="admin-toggle"
+          :aria-expanded="isPasswordFormOpen"
+          aria-controls="admin-password-form"
+          @click="isPasswordFormOpen = !isPasswordFormOpen"
+        >
+          <span>Аккаунт</span>
+          <span class="admin-toggle__chevron" :class="{ 'admin-toggle__chevron--open': isPasswordFormOpen }" aria-hidden="true"></span>
+        </button>
+      </h2>
       <div v-show="isPasswordFormOpen" id="admin-password-form">
         <form class="stack admin-form" novalidate @submit.prevent="submitPasswordChange">
         <div class="field">
@@ -275,37 +265,35 @@ onMounted(() => {
       <ErrorState v-else-if="healthError && !health" :message="healthError" @retry="loadHealth" />
 
       <template v-else-if="health">
-        <div class="admin-health">
-          <StorageDonutChart :storage="health.storage" :disk-free-bytes="health.disk_free_bytes" />
-          <ul class="admin-health__facts">
-            <li class="admin-health__fact">
-              <span class="admin-health__fact-label">Треков в библиотеке</span>
-              <span class="admin-health__fact-value">{{ health.track_count }}</span>
-            </li>
-            <li class="admin-health__fact">
-              <span class="admin-health__fact-label">Директории хранилища</span>
-              <span
-                class="admin-health__fact-value"
-                :class="health.storage_ok ? 'admin-health__fact-value--ok' : 'admin-health__fact-value--warn'"
-              >
-                {{ health.storage_ok ? 'в порядке' : 'проблема' }}
-              </span>
-            </li>
-            <li class="admin-health__fact">
-              <span class="admin-health__fact-label">Свободно на диске</span>
-              <span class="admin-health__fact-value">{{ formatBytes(health.disk_free_bytes) }}</span>
-            </li>
-            <li class="admin-health__fact">
-              <span class="admin-health__fact-label">ffmpeg</span>
-              <span
-                class="admin-health__fact-value"
-                :class="health.ffmpeg_found ? 'admin-health__fact-value--ok' : 'admin-health__fact-value--warn'"
-              >
-                {{ health.ffmpeg_found ? 'доступен' : 'не найден' }}
-              </span>
-            </li>
-          </ul>
-        </div>
+        <StorageBarChart :storage="health.storage" :disk-free-bytes="health.disk_free_bytes" />
+        <ul class="admin-health__facts">
+          <li class="admin-health__fact">
+            <span class="admin-health__fact-label">Треков в библиотеке</span>
+            <span class="admin-health__fact-value">{{ health.track_count }}</span>
+          </li>
+          <li class="admin-health__fact">
+            <span class="admin-health__fact-label">Директории хранилища</span>
+            <span
+              class="admin-health__fact-value"
+              :class="health.storage_ok ? 'admin-health__fact-value--ok' : 'admin-health__fact-value--warn'"
+            >
+              {{ health.storage_ok ? 'в порядке' : 'проблема' }}
+            </span>
+          </li>
+          <li class="admin-health__fact">
+            <span class="admin-health__fact-label">Свободно на диске</span>
+            <span class="admin-health__fact-value">{{ formatBytes(health.disk_free_bytes) }}</span>
+          </li>
+          <li class="admin-health__fact">
+            <span class="admin-health__fact-label">ffmpeg</span>
+            <span
+              class="admin-health__fact-value"
+              :class="health.ffmpeg_found ? 'admin-health__fact-value--ok' : 'admin-health__fact-value--warn'"
+            >
+              {{ health.ffmpeg_found ? 'доступен' : 'не найден' }}
+            </span>
+          </li>
+        </ul>
       </template>
     </section>
 

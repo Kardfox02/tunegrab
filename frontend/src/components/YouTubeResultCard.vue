@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import DownloadProgress from './DownloadProgress.vue'
+import { formatDuration } from '@/utils/format'
 import type { Track } from '@/types/track'
 import type { YouTubeSearchResult } from '@/types/youtube'
 
@@ -27,16 +28,6 @@ const buttonLabel = computed(() => {
   }
   return 'Скачать'
 })
-
-function formatDuration(duration: number | null): string {
-  if (duration === null) {
-    return '—'
-  }
-  const totalSeconds = Math.round(duration)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = String(totalSeconds % 60).padStart(2, '0')
-  return `${minutes}:${seconds}`
-}
 </script>
 
 <template>

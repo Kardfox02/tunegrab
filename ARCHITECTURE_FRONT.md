@@ -49,7 +49,7 @@
 Работают два процесса (фактическая конфигурация `vite.config.ts`):
 
 ```text
-Vite :8080 (host: true, allowedHosts: [RETIRED_DOMAIN])
+Vite :8080 (host: true, strictPort, allowedHosts — приватный список хостов в vite.config.ts)
   └── proxy /auth, /tracks, /youtube, /stream, /covers, /events, /likes,
           /playlists, /admin/health, /admin/thumbnails, /admin/commands
           (админ-API — точные префиксы: широкое '/admin' перехватило бы
@@ -106,12 +106,13 @@ frontend/
     │   ├── TrackList.vue            # <ul> из TrackRow (+ drag&drop-проброс)
     │   ├── TrackRow.vue             # строка трека: обложка, статус, удаление, лайк, «в плейлист», drag-handle
     │   ├── SearchForm.vue           # форма поиска (defineModel, enterkeyhint)
-    │   ├── StorageDonutChart.vue    # SVG-донат хранилища (stroke-dasharray, легенда)
+    │   ├── StorageBarChart.vue      # линейчатая шкала хранилища (flex-сегменты, легенда)
     │   ├── YouTubeResultCard.vue    # карточка результата: превью, статус, кнопка
     │   ├── DownloadProgress.vue     # progressbar + aria-live-лейбл
+    │   ├── AddToPlaylistPopover.vue  # модальный поповер «в плейлист» (Escape, клик вне)
     │   ├── LoadingState.vue / EmptyState.vue / ErrorState.vue
     ├── services/
-    │   ├── cover-color.service.ts   # доминирующий цвет обложки (canvas, кэш)
+    │   ├── cover-color.service.ts   # доминирующий цвет обложки (canvas, LRU-кэш + негативный кэш)
     │   └── media-session.service.ts # MediaSession API с feature-detection
     ├── stores/
     │   ├── auth.store.ts
@@ -144,9 +145,15 @@ frontend/
     ├── composables/
     │   ├── useDebouncedSearch.ts    # debounce + AbortGroup + state машины запроса
     │   ├── usePolling.ts            # createPolling: интервалы, visibilitychange
-    │   ├── useInfiniteScroll.ts     # IntersectionObserver-сентинел бесконечного списка
+    │   ├── useInfiniteScroll.ts     # IntersectionObserver-сентинел + ручная проверка при разблокировке
     │   ├── useMediaQuery.ts         # useMediaQuery / useIsDesktop
-    │   └── useSwipeSwitch.ts        # touch-свайп плеера (prev/next)
+    │   ├── useSwipeSwitch.ts        # touch-свайп плеера (prev/next, pointercancel-safe)
+    │   └── useAddToPlaylistPopover.ts # общая проводка поповера «в плейлист» (Library/Profile)
+    ├── utils/
+    │   ├── error-messages.ts        # локализация detail-строк бэкенда и axios
+    │   ├── format.ts                # formatBytes, formatDuration (общие хелперы)
+    │   ├── password.ts              # PASSWORD_MIN_LENGTH = 8 (единая с бэком константа)
+    │   └── plural.ts                # formatTrackCount — русские склонения счётчиков
     ├── styles/
     │   ├── tokens.css               # дизайн-токены (цвета, отступы, z-index, переходы)
     │   ├── base.css                 # reset, типографика, focus-visible, reduced-motion
@@ -262,14 +269,17 @@ active ← items с активными статусами
 для каждого: startPolling(trackId)
 ```
 
+`restore()` **мемоизируется Promise** (паттерн `auth.restoreSession`), а не булевым флагом: параллельные вызовы guard'а при двойной навигации делят один in-flight Promise — раньше оба прохода выполняли `fetchActiveDownloads()` и поздний снапшот затирал треки, поставленные в очередь между запросами.
+
 Правила polling (`createPolling` из `usePolling.ts`):
 
 - один poller на `track_id`; видимой вкладке — 1500 мс, скрытой — 12000 мс;
 - `visibilitychange → visible` — немедленное обновление;
-- `runningTask` — защита от наложения тиков;
+- `runningTask` — защита от наложения тиков; исключение внутри `task()` гасится в `runTask` (unhandled rejection раньше ронял бы тик);
 - опция `runOnStart` (по умолчанию `true`) — выполнить задачу сразу при `start()`; `false` — ждать первого интервала (используется, когда начальная загрузка уже сделана вызывающим кодом);
 - активные статусы: `pending/downloading/converting/finalizing`; терминальные `done/error/cancelled` останавливают polling;
-- `done` → обновить библиотеку (`library.load()`) + уведомление; `error` → предупреждение.
+- `done` → обновить библиотеку (`library.load()`) + уведомление; `error` → предупреждение;
+- **бюджет ошибок `POLLING_FAILURE_BUDGET = 5`**: подряд неудачные запросы статуса (сеть/5xx) останавливают poller с warning-тостом «Статус загрузки недоступен — отслеживание остановлено»; успешный тик сбрасывает счётчик; **4xx (кроме 429 rate-limit) — мгновенный stop без ожидания бюджета** (404 у «мертвого» трека не исправится, а бессрочный интервал тикал до logout).
 
 Защита от stale responses — generation token на `track_id` (+ глобальный `epoch` для logout/reset):
 
@@ -314,41 +324,57 @@ Media Session: `services/media-session.service.ts` оборачивает `navig
 
 Личные данные пользователя (кабинет + сердечки в списках). Состояние: `stats` (период задаёт вызывающий, по умолчанию 7 дней), `likedTracks`, `likedTrackIds` (Set — источник для сердечек), `togglingIds`, `likesTotal`/`likesCursor`/`hasMoreLikes` (серверная пагинация), флаги загрузки/ошибок.
 
-- `loadProfile(force = false)` — лениво один раз за сессию (параллельно stats + **полный набор лайкнутых id** через `GET /likes/ids` + первая партия likes), вызывается из `SettingsView` и `LibraryView` (сердечкам нужен набор лайков);
+- `loadProfile(force = false)` — лениво один раз за сессию (параллельно stats + **полный набор лайкнутых id** через `GET /likes/ids` + первая партия likes), вызывается из `ProfileView` и `LibraryView` (сердечкам нужен набор лайков);
   - `likedTrackIds` и постраничный список `likedTracks` — **независимые состояния**: ids приходят одним лёгким запросом сразу для всех лайков пользователя и работают во всей библиотеке и плеере; список «Любимое» догружается партиями и на сердечки не влияет — лайк на треке за пределами первой партии виден без прокрутки списка (раньше сердечко появлялось только после дозагрузки «Любимого» до этого трека);
 - `refreshLikes()` — перезагружает только постраничный список «Любимого»; `likedTrackIds` не трогает (их источник — `GET /likes/ids` и оптимистичный toggle);
-- `refreshStats(periodDays?)` — перезагрузка только статистики (опциональный период пробрасывается в `GET /events/me/stats?period_days=...`); вызывается переключателем периода и поллингом в `SettingsView`;
+- `refreshStats(periodDays?)` — перезагрузка только статистики (опциональный период пробрасывается в `GET /events/me/stats?period_days=...`); вызывается переключателем периода и поллингом в `ProfileView`;
+  - **гонка периодов закрыта request-id**: клик «30 дней» + тик поллинга «7 дней» — раньше побеждал ответ, пришедший последним, независимо от выбора; теперь монотонный `statsRequestId` позволяет писать `stats` только самому свежему запросу (ошибка/сброс флага — тоже только если запрос ещё актуален);
 - «Любимое» — **дозагрузка при скролле**, как в библиотеке: `loadNextLikes()` по партиям 50 (сентинел `useInfiniteScroll`), дедупликация параллельных вызовов одним Promise, фильтрация дублей (offset + оптимистичные удаления);
 - `toggleLike(track)` — **оптимистичный toggle**: Set + список + счётчик обновляются мгновенно, при ошибке — откат и тост; идемпотентность бэка гасит гонки двойных тапов;
 - ответы валидируются (мусорный ответ → ошибка секции, а не падение рендера);
-- `auth.onSessionTeardown` — полный сброс.
+- **`dataEpoch` — защита межсессионной контаминации** (аналог generation-токенов в downloads): logout-сброс (`isLoaded` становится `false`) + ответ in-flight `loadProfile`/`loadNextLikes` писал бы данные старого пользователя в состояние нового и навсегда блокировал перезагрузку (ранее `isLoaded=true` выставлялся поздним ответом). Теперь: async-метод захватывает `dataEpoch` до `await` и проверяет после — расходившийся epoch отбрасывает ответ целиком, `finally` не трогает флаги чужого прохода. Инкремент(epoch) выполняется и в teardown, и в `reloadProfile` (аннулирует in-flight запросы предыдущего посещения кабинета);
+- `auth.onSessionTeardown` — полный сброс (инкремент `dataEpoch` и `statsRequestId`).
 
 ### `playlists.store`
 
 Состояние: `playlists` (плитки кабинета), `detail` (страница плейлиста по id), флаги загрузки/ошибок списка и detail.
 
 - `load(force?)` — список своих плейлистов, лениво один раз за сессию; `loadDetail(id, force)` — детальная страница (force при каждом входе — данные должны быть свежими);
+  - **epoch-защита (`dataEpoch`, инкремент в `reset()`)**: быстрый переход P1→P2 — поздний ответ P1 не затирает `detail` под URL P2 (раньше «чужой» плейлист рисовался под чужим адресом, а мигающий спиннер зависал); при ошибке запроса к неактуальному id `detail` не трогается, при fail актуального id с mismatch — `detail = null` (баннер ошибки больше не рисуется поверх чужого контента);
 - `create(name)` → `POST /playlists` + тост + аппенд плитки; `rename`, `remove` (плитки и detail синхронизируются);
 - `addTrack(playlistId, trackId)` — ответ (detail) заменяет `detail`, `track_count` плитки обновляется; 409 → тост «уже в плейлисте»;
 - `removeTrack` — локальное удаление из detail + компактизация счётчика;
 - `reorder(playlistId, orderedTracks)` — **оптимистичный**: detail обновляется сразу, при ошибке `PUT .../order` — откат и тост;
+  - **rollback затрагивает только `items`**: конкурентные `rename`/`share`, успевшие завершиться во время await, раньше откатывались вместе с порядком (stale `name`/`share_url`); теперь откат сохраняет актуальные поля detail и восстанавливает исключительно порядок треков;
 - `share(playlistId)` / `revokeShare(playlistId)` — `share_url` синхронно в плитке и detail;
-- `auth.onSessionTeardown` — полный сброс.
+- `auth.onSessionTeardown` — полный сброс (= `reset()`, инкрементирует epoch).
 
 ### `notifications.store`
 
 `push(message, type = 'info', duration = 5000)` — авто-dismiss через таймер; `dismiss(id)`, `clear()`. Типы: `info | success | warning | error`. Отрисовка — `AppNotifications` (глобально, вне RouterView), `aria-live="polite"` + `TransitionGroup`.
+
+Защита от шторма (падающий поллер, серия сетевых сбоев):
+
+- **Cap `MAX_NOTIFICATIONS = 30`**: при переполнении вытесняются самые старые тосты (их таймеры снимаются);
+- **Дедуп повторов**: `push` той же связки message+type, пока тост висит, не создаёт новую DOM-ноду — увеличивает счётчик `repeats` и продлевает таймер; `AppNotifications` показывает бейдж `×N` (`.notification__repeat-count`);
+- **`dismiss(id)` снимает `setTimeout`** из `Map timeouts` — ручное закрытие не оставляет мёртвых таймеров; `clear()` чистит все.
 
 ## 7. HTTP-клиент и API
 
 `api/client.ts`:
 
 - единственный axios-инстанс: `baseURL: ''` (относительные пути), `withCredentials: true`;
+- **`request<T>(config)` — единая точка запросов для доменных модулей**: выполняет запрос через `apiClient.request` и делает soft-validation формы тела через опциональный `assertShape(body)` (мусорный ответ → понятная ошибка «Malformed … response», а не `undefined`/`NaN` глубоко в UI). Экспортируется через `api/index.ts`; все доменные модули построены на нём (кроме 204-без-тела случаев и multipart upload, где нужен сырой `apiClient`);
 - `apiErrorFromAxios()` нормализует любые ошибки в `ApiError { status, detail, fields, aborted }`:
   - `axios.isCancel` → `aborted: true` (для схем «забрать последний запрос»);
   - массив `detail` в формате Pydantic 422 → склеенный `detail` + `fields: Record<имя_поля, msg>`;
   - остальное → строковый `detail` или сообщение axios;
-- response-interceptor: `401` на незащищённом списке путей → `unauthorizedHandler` (регистрируется auth.store), после чего ошибка всё равно пробрасывается дальше в caller;
+  - локализация: известные английские detail-строки бэкенда и шаблонные сообщения axios переводятся в русском тексте (`utils/error-messages.ts`: точный словарь + статус-fallback + pydantic-подстановки по полям); неизвестные строки проходят прозрачно;
+- response-interceptor:
+  - **ранний `axios.isCancel(error)`** — отмена уходит в `aborted: true` до 401-логики. Необходимо, потому что в axios v1 `CanceledError extends AxiosError`: без раннего выхода отмена проходила бы весь 401-пайплайн;
+  - `401` на «безопасном» списке путей (`/auth/me`, `/auth/login`, `/auth/change-password`) **не** вызывает teardown — их 401 обрабатывается вызывающим кодом (restore/login/change-password);
+  - `401` любого другого запроса → `unauthorizedHandler` (регистрируется auth.store → `markUnauthenticated()`), после чего ошибка всё равно пробрасывается дальше в caller;
+  - **дедуп параллельных 401**: волна одновременных 401 (десяток запросов при заходе на страницу) дергала handler N раз подряд — N teardown'ов и редиректов. Флаг `isUnauthorizedHandled` глушит повторы; сбрасывается успешным ответом (сессия снова жива) и в `setUnauthorizedHandler` (re-init);
 - `createAbortGroup()` — реюзабельная группа AbortController: `nextSignal()` отменяет предыдущий и выдаёт новый, `abort()` гасит группу. Используется в поиске, библиотеке и polling.
 
 Доменные модули (тонкие, без бизнес-логики):
@@ -430,11 +456,11 @@ pending 0% | downloading 0–80% | converting 80–95% | finalizing 95–99% | d
 - `PlayerBar` — единственный владелец `<audio preload="auto">`; источник — `/stream/{id}`. Cookie и Range-запросы браузер отправляет сам: перемотка и частичная загрузка работают без участия axios. Blob URL для обычного воспроизведения не создаётся.
 - Первый запуск — после явного действия пользователя; `audio.play()` как Promise, отказ (autoplay-политики iOS) → `audioPaused()`, не ошибка приложения.
 - Компонент обрабатывает `play/pause/timeupdate/loadedmetadata/waiting/stalled/canplay/ended/error`; `error` → `player.audioFailed(...)`.
-- **Автовосстановление стрима** (`player.store`): обрыв фонового воспроизведения (Android Doze приостанавливает сеть, разрыв SSH-туннеля) рвёт Range-соединение, и браузер сам его не восстанавливает. Поэтому:
+- **Автовосстановление стрима** (`player.store`): обрыв фонового воспроизведения (Android Doze приостанавливает сеть, разрыв соединения при сетевом сбое) рвёт Range-запрос, и браузер сам его не восстанавливает. Поэтому:
   - `audioFailed` больше не завершает воспроизведение ошибкой, а запускает восстановление: пауза 1 с → повторный `load(audio_url)` + `play()`; после `canplay` позиция восстанавливается одноразовым `seek()` (флаг `pendingResumeAt`); максимум 3 попытки (`MAX_RECOVERY_ATTEMPTS`), затем — постоянная ошибка «Не удалось воспроизвести трек» + `mediaSession.setPaused()`.
   - **stall-watchdog**: обрыв TCP без `error`-события проявляется как молчаливое зависание; каждый `timeupdate` при `isPlaying` перезаводит таймер 10 с (`STALL_TIMEOUT_MS`); срабатывание при игре запускает тот же путь восстановления. Ручная пауза (`audioPaused`) и любые смены трека/сброс (`playTrack`, `reset`) гасят таймеры и сбрасывают счётчик попыток; успешный старт (`audioPlaying`) возвращает счётчик в 0.
   - `preload="auto"` (вместо `metadata`) — больший буфер переживает короткие сетевые ямы без разрыва.
-- Touch: `useSwipeSwitch` на панели — свайп влево/вправо (порог 25% ширины, вертикальный дрейф, превышающий горизонтальный, жестом не считается — это скролл страницы) переключает трек; кнопки/инпуты исключены (`shouldIgnoreTarget`), `touch-action: none` в CSS.
+- Touch: `useSwipeSwitch` на панели — свайп влево/вправо (порог 25% ширины, вертикальный дрейф, превышающий горизонтальный, жестом не считается — это скролл страницы) переключает трек; кнопки/инпуты исключены (`shouldIgnoreTarget`), `touch-action: none` в CSS. **`pointercancel`** (браузер забрал указатель: системный жест, входящий звонок, прерванный скролл) — отдельный обработчик: жест сбрасывается **без** триггера свайпа; маппинг cancel → pointerup привёл бы к случайному переключению трека и залипшему `activePointerId`, блокировавшему все последующие свайпы.
 - **Кнопка лайка**: круглая 3×3rem слева от обложки (grid-область `like` на обоих брейкпоинтах). Неликнутое — контур в muted-цвете; лайкнутое — заливка `--track-accent` (цвет обложки играющего трека, как у play-кнопки) с тёмной иконкой. Toggle через общий `profile.toggleLike` — состояние синхронно между плеером, библиотекой и кабинетом.
 - **Телеметрия прослушиваний** (`player.store`): события `play` (первый старт трека) и `complete`/`skip` (при ended и ручных переходах) уходят в `POST /events` fire-and-forget. **fraction_played — по фактически прослушанному времени**: `listenedSeconds` накапливается дельтами `timeupdate` ≤ 2 c (большой скачок = перемотка, не засчитывается); seek задаёт новую точку отсчёта; сброс при смене трека/reset. Перемотка на середину с дослушиванием даёт ~0.5, а не 1.0.
 - Удаление трека: только после 204; при `409` player state не трогается.
@@ -448,13 +474,13 @@ pending 0% | downloading 0–80% | converting 80–95% | finalizing 95–99% | d
 | Статус | Поведение |
 |---|---|
 | 401 `/auth/me` | завершить restore как anonymous |
-| 401 прочие | teardown → `/login` |
-| 403 | показать отказ (например, POST без доверенного Origin) |
-| 404 | «ресурс исчез»; polling при 404 статуса повторится на следующем тике |
+| 401 прочие | teardown → `/login` (волна параллельных 401 дедуплицируется — один teardown) |
+| 403 | показать отказ (например, POST без доверенного Origin); polling при 403 → мгновенный stop (4xx-ветка бюджета) |
+| 404 | «ресурс исчез»; polling при 404 статуса → мгновенный stop (4xx-ветка бюджета) |
 | 409 | конфликт (занят файл при удалении, дубликат при upload) — инлайн у строки/карточки |
 | 422 | разбор полей в `ApiError.fields` |
-| 429 | показать «слишком много попыток», без авто-ретраев |
-| сеть/5xx | ошибка блока с кнопкой retry; polling не останавливается |
+| 429 | показать «слишком много попыток», без авто-ретраев; polling продолжает тикать (429 не входит в 4xx-stop) |
+| сеть/5xx | ошибка блока с кнопкой retry; polling выдерживает до 5 подряд (бюджет), потом stop + тост |
 
 Ошибки по месту возникновения:
 
@@ -464,11 +490,12 @@ pending 0% | downloading 0–80% | converting 80–95% | finalizing 95–99% | d
 
 ## 10. Производительность
 
-- Библиотека — бесконечный список: первая партия 50 + догрузка по доскроллу (`IntersectionObserver`-сентинел, `rootMargin: 200px`, спиннер в сентинеле); наблюдатель перепривязывается к сентинелу через watcher за ref — сентинел рендерится динамически и в момент mount может не существовать; виртуализация не применяется.
+- Библиотека — бесконечный список: первая партия 50 + догрузка по доскроллу (`IntersectionObserver`-сентинел, `rootMargin: 200px`, спиннер в сентинеле); наблюдатель перепривязывается к сентинелу через watcher за ref — сентинел рендерится динамически и в момент mount может не существовать; **гонка «сентинел остался во вьюпорте» закрыта**: при выходе из блокировки (`isDisabled` — reactive watch) делается ручная геометрическая проверка сентинела, т.к. IO не пришлёт новое событие за старое пересечение; виртуализация не применяется.
 - Поиск: debounce 350 мс (`useDebouncedSearch`), отмена устаревшего запроса через `AbortGroup`, `minLength = 2`.
-- Обложки: `loading="lazy" decoding="async"`, фиксированные контейнеры (aspect-ratio) против layout shift.
+- Обложки: `loading="lazy" decoding="async"`, фиксированные контейнеры (aspect-ratio) против layout shift. Извлечение акцентного цвета — по `@load` видимой картинки (`TrackRow`), а не синхронный `new Image()` при mount: offscreen-строки не качают и не декодируют обложки; синхронно только кэш-гидратация. Кэш цветов — **LRU (500 записей) + негативный кэш** провалов (битый URL / tainted canvas кэшируется коротким sentinel — повторная загрузка не запускается).
 - Аудио и blob-объекты никогда не попадают в Pinia.
-- Polling ≤ 1 раза в 1.5 с на видимой вкладке, 12 с — на скрытой; моментальный refresh при возврате на вкладку.
+- `TrackRow`: window-listener `pointerup` активен только во время drag в конкретной строке (раньше постоянный listener на каждую строку — N listeners на список, вызовы на любой клик страницы).
+- Polling ≤ 1 раза в 1.5 с на видимой вкладке, 12 с — на скрытой; моментальный refresh при возврате на вкладку; исключение задачи гасится внутри `runTask` (без unhandled rejection).
 - Lazy-чанки всех views и `AppShell`; анимации — CSS-транзишены, не JS-таймеры.
 - `prefers-reduced-motion` глобально гасит анимации и переходы (base.css).
 
@@ -525,11 +552,11 @@ Layout (`styles/layout.css`):
 
 Открывается по клику на никнейм в `AppHeader` (`RouterLink to="/admin"`, aria-label «Панель управления»; sticky-hover-подсветка цвета текста, как у остальных hover-элементов). Три секции-карточки (`.card.settings-section`, токены и стекло — как в кабинете):
 
-- **Аккаунт** — секция-тоггл (форма скрыта по умолчанию): заголовок «Аккаунт» — кнопка с `aria-expanded`/`aria-controls` и CSS-шевроном (переиспользует hover/focus/reduced-motion паттерны). Внутри — форма смены пароля (текущий / новый ≥ 8 символов / повтор) поверх готового `auth-api.changePassword`; клиентская валидация длины и совпадения, ошибка 401 → «Текущий пароль неверен», успех → сброс полей + тост. Смена пароля отзывает прочие сессии (token_version) и выдаёт свежую cookie — состояние фронта не сбрасывается.
-- **Состояние сервера** — `StorageDonutChart` (SVG-донат на `stroke-dasharray`; сегменты: аудио — accent, обложки — success, превью — warning, **свободное место на диске — 4-й сегмент** в `--color-surface-hover`; нулевые категории не рендерятся вовсе — round-cap рисовал бы точку; зазор между дугами только при 2+ сегментах, одиночная дуга — полное кольцо; центр — занято всего; `role="img"` + aria-label с раскладкой) и факты: число треков, свободно на диске, статус директорий и ffmpeg (ok/warn цветами). Загрузка при маунте — `LoadingState`/`ErrorState` с retry. Легенда строится из тех же `arcs` — согласована с диаграммой автоматически.
+- **Аккаунт** — секция-тоггл (форма скрыта по умолчанию): заголовок «Аккаунт» — `<h2>` с кнопкой внутри (`aria-expanded`/`aria-controls`, CSS-шеврон; корректная content-model — интерактивный элемент вложен в heading, а не наоборот; переиспользует hover/focus/reduced-motion паттерны). Внутри — форма смены пароля (текущий / новый ≥ 8 символов / повтор поверх `PASSWORD_MIN_LENGTH`) поверх готового `auth-api.changePassword`; клиентская валидация длины и совпадения, ошибка 401 → «Текущий пароль неверен», успех → сброс полей + тост. Смена пароля отзывает прочие сессии (token_version) и выдаёт свежую cookie — состояние фронта не сбрасывается.
+- **Состояние сервера** — `StorageBarChart` (линейчатая шкала хранения: сегменты-полосы во flex-потоке — аудио — accent, обложки — success, превью — warning; серый фон трека — сегмент «Свободно», как в проводнике; перекрытие сегментов невозможно по построению; нулевые категории не рендерятся; метки «Занято X / Свободно Y» над шкалой; `role="img"` + aria-label с раскладкой; легенда из тех же `entries` — согласована со шкалой автоматически) и факты: число треков, свободно на диске, статус директорий и ffmpeg (ok/warn цветами). Загрузка при маунте — `LoadingState`/`ErrorState` с retry.
 - **Обслуживание** — три действия с общим флагом `busyCommand` (кнопки disabled во время любой операции): «Очистить кэш превью» (`confirm()` → результат N файлов / освобождено X), «Проверить хранилище» (аналог CLI verify-storage: список ошибок или «проверка пройдена»), «Очистить сироты-файлы» (аналог CLI cleanup-orphans: `confirm()` → список удалённых). Результаты — inline-блоки + тосты через `notifications.store`; после очисток — обновление диаграммы (`loadHealth()`).
 
-Форматирование байтов (Б/КБ/МБ/ГБ/ТБ) — локальные хелперы в `AdminView` и `StorageDonutChart`.
+Форматирование байтов (Б/КБ/МБ/ГБ/ТБ) — общий хелпер `formatBytes` из `utils/format.ts` (в `AdminView` и `StorageBarChart`).
 
 - `ProfileView` (маршрут `/profile`, историческое имя view-файла и CSS-классов `settings-*` сохранено; `/settings` → redirect) — личный кабинет: приветствие «Привет, {username}», секции Статистика → Плейлисты (плиточная сетка) → Любимое (с дозагрузкой при скролле), кнопка «Выйти» в шапке. Смена пароля живёт в панели управления `/admin` (см. выше).
   - **Статистика**: переключатель периода (24 часа / 7 дней / 30 дней — сегмент-кнопки, сменa → немедленный `refreshStats(days)`) + **автообновление каждые 30 с** через `createPolling` (`runOnStart: false`, чтобы не дублировать запрос `reloadProfile()` при маунте; в фоновой вкладке интервал больше, при возврате на вкладку — мгновенный тик). Заголовок секции отражает выбранный период; топ-3 ранжируется на бэке с затуханием по свежести (см. ARCHITECTURE.md). Общее время прослушивания показывается только в счётчиках сверху; у треков в топе время не выводится — только место, обложка, название и автор.
@@ -545,9 +572,10 @@ Layout (`styles/layout.css`):
   - share-блок (`v-if="isOwner"`): создание/копирование (`navigator.clipboard.writeText`; работает только в secure context — на HTTP-доменах clipboard API недоступен и срабатывает fallback `prompt()`; подробности HTTPS-перехода — в личных заметках, не в репозитории)/отзыв ссылки;
   - треки через `TrackList` (play = `player.playOrToggle(track, items)` — очередь = плейлист); удаление трека из плейлиста — **крестик** (`remove-icon="close"` в `TrackRow`), трек остаётся в библиотеке;
   - **мок-строка «Добавить трек» первой** в секции треков; раскрывает **пикер**: поиск (локальный debounce 350 мс + AbortGroup), партии по 50 с догрузкой при скролле (`useInfiniteScroll` + сентинел внутри пикера), уже добавленные треки **скрываются** (клиентский фильтр + дедупликация партий по id — offset-пагинация даёт дубли), клик → `addTrack` (тост «Трек добавлен в плейлист»; 409 гонки гасится тостом бэка). Состояние пикера локальное в view, запросы идут напрямую через `tracks-api` (library.store не трогается);
-  - **drag&drop reorder**: pointer events по drag-handle (`grip`) **слева от обложки** (отдельная grid-колонка `track-row--draggable` в `TrackRow`, включая desktop-media-override), `pointerdown` на handle → `dragStart`, `pointerenter` строк → `dropIndex`, document `pointerup` → `dragEnd`; **автоскролл**: во время drag document-`pointermove` + rAF-цикл, курсор в зоне ≤80px от верх/низ вьюпорта прокручивает страницу (скорость растёт у края); drop → оптимистичный `reorder` + `PUT /tracks/order`.
-- **Добавление из библиотеки и «Любимого»**: кнопка «в плейлист» в `TrackRow` (`addToPlaylist`, prop `showAddToPlaylist`) → модальный поповер `AddToPlaylistPopover` с **сеткой плиток** плейлистов (auto-fill `minmax(8.5rem, 1fr)`): стеклянная иконка, имя с ellipsis, атрибуция «от {username}» для соавторских, счётчик треков со склонением; пустой список — сообщение «Плейлистов пока нет».
-- **`SharedView`** (`/shared/:token`): публичная страница вне `AppShell`, но контейнеризация как у остальных — корень `<main class="page">` + `stack shared-view` (горизонтальные поля, max-width, центрирование, `<main>`-landmark). Загрузка по токену (404/отзыв → ErrorState с retry), `page-header` (название + «Поделился: {owner_username}»), список треков (номер, обложка, title/author, длительность) **без кнопок воспроизведения**; аноним → CTA «Войти» с `redirect` обратно на share-ссылку; залогиненный → тихая **автоподписка** (`POST /subscribe`, дожидается `auth.initialized`, чтобы не подписаться под чужой сессией) → карточка «Плейлист добавлен в ваши плейлисты» + кнопка «Открыть плейлист» → `/playlists/{id}`.
+  - **drag&drop reorder**: pointer events по drag-handle (`grip`) **слева от обложки** (отдельная grid-колонка `track-row--draggable` в `TrackRow`, включая desktop-media-override), `pointerdown` на handle → `dragStart`, `pointerenter` строк → `dropIndex`, document `pointerup` → `dragEnd` (**`pointercancel`** → отмена жеста: сброс `dragIndex`/`dropIndex` + остановка автоскролла — без этого системная отмена жеста зависала бы на неопределённый срок); **автоскролл**: во время drag document-`pointermove` + rAF-цикл, курсор в зоне ≤80px от верх/низ вьюпорта прокручивает страницу (скорость растёт у края); drop → оптимистичный `reorder` + `PUT /tracks/order`;
+  - **пикер**: `runPickerSearch()` абортит in-flight запрос (`pickerAbortGroup.nextSignal()`) перед сбросом курсора — иначе старый запрос возвращал бы promise по раннему `return` от `isLoadingPickerPage`, и его ответ дописывался бы в сброшенный список.
+- **Добавление из библиотеки и «Любимого»**: кнопка «в плейлист» в `TrackRow` → модальный поповер `AddToPlaylistPopover` (общая проводка — `useAddToPlaylistPopover`) с **сеткой плиток** плейлистов (auto-fill `minmax(8.5rem, 1fr)`): стеклянная иконка, имя с ellipsis, атрибуция «от {username}» для соавторских, счётчик треков со склонением; пустой список — сообщение «Плейлистов пока нет». `role="dialog"` + закрытие по **Escape** и **клику/тапу вне** поповера.
+- **`SharedView`** (`/shared/:token`): публичная страница вне `AppShell`, но контейнеризация как у остальных — корень `<main class="page">` + `stack shared-view` (горизонтальные поля, max-width, центрирование, `<main>`-landmark). Загрузка по токену (404/отзыв → ErrorState с retry; **отменённый запрос не пишет error** — иначе при смене token ErrorState остался бы навсегда поверх данных), `page-header` (название + «Поделился: {owner_username}»), список треков (номер, обложка, title/author, длительность) **без кнопок воспроизведения**; аноним → CTA «Войти» с `redirect` обратно на share-ссылку; залогиненный → тихая **автоподписка** (`POST /subscribe`, дожидается `auth.initialized`, чтобы не подписаться под чужой сессией; **флаг `isSubscribing` + сравнение токена до/после await** — сменившийся токен или повторный вызов не дублируют подписку и не пишут чужой `subscribedPlaylistId`) → карточка «Плейлист добавлен в ваши плейлисты» + кнопка «Открыть плейлист» → `/playlists/{id}`.
 
 ### Иконки
 
@@ -555,6 +583,7 @@ Layout (`styles/layout.css`):
 - Service worker не реализован: офлайн-режима нет, `manifest.webmanifest` даёт только установку иконки/темы.
 - В `vite.config.ts` dev-порт `8080` (историческая документация упоминала `5173`).
 - `E2E`-сценариев нет: покрытие — только модульные тесты.
+- **Непокрытые контракты** (введены в ходе аудита, unit-тесты на них — будущий шаг): epoch-механики `dataEpoch`/`statsRequestId` в `profile.store` и `playlists.store`, бюджет ошибок поллера (`POLLING_FAILURE_BUDGET`) и 4xx-stop, дедуп параллельных 401 и ранний `isCancel`-выход в interceptor'е, `onPointerCancel` в `useSwipeSwitch`, ручная проверка сентинела при разблокировке в `useInfiniteScroll`, LRU/негативный кэш в `cover-color.service`, ленивое `@load`-извлечение цвета в `TrackRow`, Escape/outside-click в `AddToPlaylistPopover`.
 
 ## 13. Тесты
 
@@ -570,12 +599,12 @@ Layout (`styles/layout.css`):
 | `router/__tests__/guards.test.ts` | redirect anonymous с сохранением `redirect`, guestOnly, один restore на навигации, redirect на login при transient-сбое restore и повтор после восстановления, 401 после входа → login, scrollBehavior (сброс наверх при навигации, восстановление `savedPosition` при back/forward) |
 | `views/__tests__/library-view.test.ts` | рендер строк и счётчик, debounce-поиск → URL, сортировка → URL, сентинел/спиннер догрузки, play через store, сквозное воспроизведение в следующую партию, локальное удаление, live-прогресс |
 | `views/__tests__/search-view.test.ts` | рендер результатов, empty/error/429-retry, постановка загрузок и статусы кнопок, upload (успех/ошибка/disabled), обновление библиотеки после upload |
-| `views/__tests__/auth-views.test.ts` | login с `redirect`, register |
+| `views/__tests__/auth-views.test.ts` | login с `redirect`, register; клиентская блокировка короткого пароля (register не вызывается) + ветка серверной ошибки |
 | `views/__tests__/profile-view.test.ts` | кабинет: статистика и переключатель периода, секция «Любимое», плитки плейлистов, logout |
 | `components/__tests__/player-bar.test.ts` | связь audio events ↔ store, использование команд, инпуты seek/volume, восстановление стрима после `error` вместо финальной ошибки |
 | `components/__tests__/app-shell.test.ts` | protected shell: навигация + пользователь |
 | `composables/__tests__/use-debounced-search.test.ts` | debounce, minLength, abort, ошибки |
-| `services/__tests__/cover-color.service.test.ts` | квантование, сохранение hue, отброс выбросов, прозрачный сэмпл → null |
+| `services/__tests__/cover-color.service.test.ts` | квантование, сохранение hue, отброс выбросов, прозрачный сэмпл → null; кэш теперь LRU (500) с переводом «недавних» в конец + негативный кэш провалов (sentinel `''` → `null` в API) |
 | `api/__tests__/*.test.ts`, `__tests__/smoke.test.ts` | транспорт и контракты |
 
 Правило границ: компонентные тесты `PlayerBar` проверяют только мост audio ↔ store; бизнес-правила очереди — в тестах `player.store`.

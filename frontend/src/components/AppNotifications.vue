@@ -17,6 +17,7 @@ const { notifications } = storeToRefs(notificationsStore)
         role="status"
       >
         <span>{{ notification.message }}</span>
+        <span v-if="notification.repeats > 1" class="notification__repeat-count">×{{ notification.repeats }}</span>
         <button
           class="notification__dismiss"
           type="button"
