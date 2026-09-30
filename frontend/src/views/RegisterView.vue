@@ -18,6 +18,10 @@ async function submit(): Promise<void> {
 
   // Клиентская проверка до запроса: сервер ответит той же ошибкой, но
   // мгновенный фидбэк дешевле полного раундтрипа.
+  if (username.value.trim().length === 0) {
+    errorMessage.value = 'Введите имя пользователя.'
+    return
+  }
   if (password.value.length < PASSWORD_MIN_LENGTH) {
     errorMessage.value = `Пароль должен быть не короче ${PASSWORD_MIN_LENGTH} символов.`
     return

@@ -23,6 +23,7 @@ Tunegrab — приложение для загрузки аудио из YouTub
 | API событий `/events`, лайков `/likes` | ✅ реализовано |
 | API плейлистов `/playlists` (+ публичный `/playlists/shared/{token}`) | ✅ реализовано |
 | Админ-панель: `/admin/health`, очистка thumbnails, команды CLI | ✅ реализовано |
+| Раздача собранного фронтенда (static_site.py + SPA fallback) | ✅ реализовано |
 | Слой repositories/ | ❌ не реализован (доступ к данным напрямую в сервисах) |
 | `/health/details` | ❌ не реализован (есть только публичный `/health`) |
 | Frontend | ✅ реализован (см. ARCHITECTURE_FRONT.md) |
@@ -257,7 +258,7 @@ UI — маршрут `/admin` (см. ARCHITECTURE_FRONT.md), открывает
 
 ## Инфраструктура
 
-- **Dev/Prod**: dev — Vite dev-server (порт 8080) + proxy на FastAPI (порт 8000); production-режим включается env `TUNEGRAB_ENV=production` (влияет на `Secure` cookie и CORS), раздача собранного фронтенда отдельно не реализована. `ALLOWED_ORIGINS` из env.
+- **Dev/Prod**: dev — Vite dev-server (порт 8080) + proxy на FastAPI (порт 8000); production-режим включается env `TUNEGRAB_ENV=production` (влияет на `Secure` cookie и CORS), `ALLOWED_ORIGINS` из env. **Раздача собранного фронтенда** (`static_site.py`): при наличии `frontend/dist` бэк отдаёт и API, и SPA единым процессом — mount `/assets` (immutable-кэш), корневые файлы dist без кэша, catch-all → `index.html`; навигация (`Accept: text/html`) уходит в SPA до маршрутизации (коллизия `/playlists/{id}` API↔страницы), API-запросы сохраняют контракты (401/404 JSON). dist отсутствует — бэк работает как чистый API (Vite proxy). Путь настраивается env `TUNEGRAB_DIST_DIR`. `OriginMiddleware` разрешает same-origin POST (сверка Origin с Host, поддерживает `X-Forwarded-Proto`).
 - **SQLite**: `journal_mode=WAL`, `busy_timeout`, **`foreign_keys=ON`**; миграции — Alembic (0001_initial_schema, 0002_active_downloads_index, 0003_playlist_access), не `create_all`.
 - **Health**: публичный `GET /health` → `{status, storage: ok|warn}` (проверка `downloads/` и `covers/`); расширенный `GET /admin/health` — только для авторизованных (раздел «Админ-панель»).
 - **Логирование**: файл + консоль; ошибки, ход загрузки, ключевые действия.

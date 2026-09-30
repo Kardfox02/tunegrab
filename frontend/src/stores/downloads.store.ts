@@ -14,20 +14,21 @@ import { useAuthStore } from '@/stores/auth.store'
 import { useLibraryStore } from '@/stores/library.store'
 import { useNotificationsStore } from '@/stores/notifications.store'
 import { isApiError } from '@/types/errors'
+import { ACTIVE_TRACK_STATUSES } from '@/types/track'
 import type { Track, TrackStatus } from '@/types/track'
 import type { YouTubeSearchResult } from '@/types/youtube'
 
 export type DownloadUiState = 'idle' | 'queued' | 'exists'
-
-const ACTIVE_STATUSES: readonly TrackStatus[] = ['pending', 'downloading', 'converting', 'finalizing']
 
 // Поллер глохнет после N подряд неудачных запросов статуса: сеть/5xx обычно
 // восстанавливаются быстрее, а «мертвый» трек (404/403) иначе крутил бы
 // бессрочный интервал до самого logout.
 const POLLING_FAILURE_BUDGET = 5
 
+const activeStatuses: ReadonlySet<TrackStatus> = new Set(ACTIVE_TRACK_STATUSES)
+
 function isActiveStatus(status: TrackStatus): boolean {
-  return ACTIVE_STATUSES.includes(status)
+  return activeStatuses.has(status)
 }
 
 export const useDownloadsStore = defineStore('downloads', () => {
@@ -210,31 +211,31 @@ export const useDownloadsStore = defineStore('downloads', () => {
 
     const epochAtStart = epoch
     restorePromise = (async () => {
-      try {
-        const response = await fetchActiveDownloads()
-        if (epoch !== epochAtStart) {
-          return
-        }
-        active.value = response.items.filter((track) => isActiveStatus(track.status))
-        for (const track of active.value) {
-          // После reload результат поиска снова должен считаться «в очереди»,
-          // иначе кнопка возвращается в idle и допускает повторную постановку.
-          youtubeLinks.set(track.youtube_id, { trackId: track.id, exists: false })
-          startPolling(track.id)
-        }
-      } catch {
-        // Ошибка восстановления не блокирует приложение — статусы подтянутся
-        // через /tracks и следующий restore после reset (isRestored=false)
-        // повторит попытку.
+      const response = await fetchActiveDownloads()
+      if (epoch !== epochAtStart) {
+        return
+      }
+      active.value = response.items.filter((track) => isActiveStatus(track.status))
+      for (const track of active.value) {
+        // После reload результат поиска снова должен считаться «в очереди»,
+        // иначе кнопка возвращается в idle и допускает повторную постановку.
+        youtubeLinks.set(track.youtube_id, { trackId: track.id, exists: false })
+        startPolling(track.id)
       }
     })()
 
     try {
       await restorePromise
-    } finally {
+      // Признак «восстановление выполнено» ставится только при успехе:
+      // сетевой сбой на старте приложения не должен глушить восстановление
+      // до пере-логина — следующий restore повторит попытку.
       if (epoch === epochAtStart) {
         isRestored.value = true
       }
+    } catch {
+      // Ошибка восстановления не блокирует приложение; поллинги, успевшие
+      // подняться до ошибки, продолжают работать самостоятельно.
+    } finally {
       restorePromise = null
     }
   }
@@ -242,7 +243,18 @@ export const useDownloadsStore = defineStore('downloads', () => {
   async function cancelDownload(trackId: number): Promise<void> {
     stopPolling(trackId)
     const generation = generations.get(trackId)
-    const track = await cancelDownloadRequest(trackId)
+    let track: Track
+    try {
+      track = await cancelDownloadRequest(trackId)
+    } catch {
+      // Сбой отмены (сеть/5xx): загрузка продолжает жить на сервере —
+      // возобновляем отслеживание, чтобы статус не завис до перезахода.
+      if (generations.get(trackId) === generation) {
+        startPolling(trackId)
+      }
+      useNotificationsStore().push('Не удалось отменить загрузку — попробуйте еще раз', 'error')
+      return
+    }
 
     if (generations.get(trackId) !== generation) {
       return

@@ -35,10 +35,26 @@ class OriginMiddleware(BaseHTTPMiddleware):
 
         return address.version == 4 and address.is_private
 
+    def _is_same_origin(self, origin: str, request: Request) -> bool:
+        """Same-origin POST (браузер шлёт Origin даже без CORS) разрешён:
+        фронт отдаётся самим бэкендом, и Origin совпадает со схемой+Host.
+        """
+        parsed = urlsplit(origin)
+        if parsed.path not in ("", "/") or parsed.username or parsed.password:
+            return False
+        forwarded_proto = request.headers.get("x-forwarded-proto")
+        scheme = forwarded_proto.split(",")[0].strip() if forwarded_proto else request.url.scheme
+        host = request.headers.get("host")
+        if not host:
+            return False
+        return parsed.scheme == scheme and (parsed.netloc or "").lower() == host.lower()
+
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = request.headers.get("origin")
-            if not self._is_allowed_origin(origin):
+            if not self._is_allowed_origin(origin) and not (
+                origin is not None and self._is_same_origin(origin, request)
+            ):
                 return JSONResponse(
                     status_code=403,
                     content={"detail": "Origin is not allowed"},

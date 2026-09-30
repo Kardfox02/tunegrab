@@ -35,7 +35,7 @@ describe('youtube api', () => {
     apiClient.defaults.adapter = async (config) => {
       calls.push({ url: config.url, data: config.data })
       return {
-        data: { track: { id: 1 }, queued: true },
+        data: { track: { id: 1, status: 'pending', title: 'Song' }, queued: true },
         status: 202,
         statusText: 'Accepted',
         headers: {},

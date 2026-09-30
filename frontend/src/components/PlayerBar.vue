@@ -2,9 +2,11 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import AppIcon from './AppIcon.vue'
+import CoverPlaceholder from './CoverPlaceholder.vue'
 import { useSwipeSwitch, type SwipeDirection } from '@/composables/useSwipeSwitch'
 import { usePlayerStore, type PlayerAudioController } from '@/stores/player.store'
 import { useProfileStore } from '@/stores/profile.store'
+import { formatDuration } from '@/utils/format'
 
 const player = usePlayerStore()
 const profile = useProfileStore()
@@ -109,8 +111,25 @@ function onLoadedMetadata(event: Event): void {
   player.audioDurationChanged(audio.duration)
 }
 
+// Перетаскивание ползунка: на input обновляется только отображение (UI),
+// коммит в аудио и стор — на change. Спам currentTime на десятки событий
+// input в секунду сбрасывал бы буферизацию звука.
+const seekPreview = ref<number | null>(null)
+
+const displayedPosition = computed(() =>
+  seekPreview.value !== null ? seekPreview.value : player.position,
+)
+
 function onSeekInput(event: Event): void {
   const value = Number((event.target as HTMLInputElement).value)
+  if (Number.isFinite(value)) {
+    seekPreview.value = value
+  }
+}
+
+function onSeekCommit(event: Event): void {
+  const value = Number((event.target as HTMLInputElement).value)
+  seekPreview.value = null
   if (Number.isFinite(value)) {
     player.seek(value)
   }
@@ -123,14 +142,13 @@ function onVolumeInput(event: Event): void {
   }
 }
 
+// Тонкая обёртка: у позиции/длительности невалидное значение — это «0:00»,
+// а не прочерк «—» (контракт formatDuration для неизвестной длительности).
 function formatTime(time: number): string {
   if (!Number.isFinite(time) || time < 0) {
     return '0:00'
   }
-  const totalSeconds = Math.floor(time)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = String(totalSeconds % 60).padStart(2, '0')
-  return `${minutes}:${seconds}`
+  return formatDuration(time)
 }
 </script>
 
@@ -152,7 +170,7 @@ function formatTime(time: number): string {
   >
     <audio
       ref="audioElement"
-      preload="auto"
+      preload="metadata"
       @play="player.audioPlaying"
       @pause="player.audioPaused"
       @timeupdate="onTimeUpdate"
@@ -178,18 +196,7 @@ function formatTime(time: number): string {
     </button>
 
     <div class="player-bar__cover" aria-hidden="true">
-      <img v-if="coverUrl" :src="coverUrl" alt="" loading="lazy" decoding="async">
-      <svg v-else viewBox="0 0 24 24" fill="none">
-        <path
-          d="M9 18V6.5L19 5v11.5"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
-        <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
-      </svg>
+      <CoverPlaceholder :src="coverUrl" />
     </div>
 
     <div class="player-bar__info">
@@ -201,7 +208,7 @@ function formatTime(time: number): string {
     </div>
 
     <div class="player-bar__seek">
-      <span class="player-bar__time">{{ formatTime(player.position) }}</span>
+      <span class="player-bar__time">{{ formatTime(displayedPosition) }}</span>
       <input
         v-show="hasTrack"
         class="player-bar__slider"
@@ -209,10 +216,11 @@ function formatTime(time: number): string {
         min="0"
         :max="player.duration || 1"
         step="0.1"
-        :value="player.position"
+        :value="displayedPosition"
         :disabled="!hasTrack"
         aria-label="Позиция воспроизведения"
         @input="onSeekInput"
+        @change="onSeekCommit"
       >
       <span class="player-bar__time">{{ formatTime(player.duration) }}</span>
     </div>

@@ -473,6 +473,65 @@ describe('downloads store', () => {
     expect(downloads.isRestored).toBe(false)
   })
 
+  it('keeps restoration pending when the initial restore fails', async () => {
+    apiClient.defaults.adapter = async (config) => {
+      const url = config.url ?? ''
+      if (config.method === 'get' && url === '/youtube/downloads/active') {
+        throw new Error('network down')
+      }
+      return jsonResponse(config, 200, { items: [], total: 0, limit: 50, offset: 0 })
+    }
+
+    const downloads = useDownloadsStore()
+    await downloads.restore()
+    await flushPromises()
+
+    expect(downloads.isRestored).toBe(false)
+
+    // Следующая попытка (после сбоя сети) должна достроить восстановление.
+    installAdapter()
+    activeList = [createTrack({ id: 1, status: 'downloading', progress: 40 })]
+    await downloads.restore()
+    await flushPromises()
+
+    expect(downloads.isRestored).toBe(true)
+    expect(downloads.active).toHaveLength(1)
+  })
+
+  it('resumes polling when cancelling fails', async () => {
+    activeList = [createTrack({ id: 1, status: 'downloading', progress: 40 })]
+    statusById.set(1, createTrack({ id: 1, status: 'downloading', progress: 41 }))
+
+    const downloads = useDownloadsStore()
+    await downloads.restore()
+    await flushPromises()
+    expect(statusRequests).toEqual([1])
+
+    let failureStatusRequests = 0
+    apiClient.defaults.adapter = async (config) => {
+      const method = config.method ?? 'get'
+      const url = config.url ?? ''
+      if (method === 'post' && url.startsWith('/youtube/cancel/')) {
+        throw new Error('network down')
+      }
+      if (method === 'get' && /^\/youtube\/\d+$/.test(url)) {
+        failureStatusRequests += 1
+        return jsonResponse(config, 200, createTrack({ id: 1, status: 'downloading', progress: 50 }))
+      }
+      return jsonResponse(config, 200, { items: [], total: 0, limit: 50, offset: 0 })
+    }
+
+    await downloads.cancelDownload(1)
+    await flushPromises()
+    expect(downloads.active).toHaveLength(1)
+    // Рестарт отслеживания делает запрос статуса сразу при старте.
+    expect(failureStatusRequests).toBeGreaterThanOrEqual(1)
+
+    await vi.advanceTimersByTimeAsync(1500)
+    await flushPromises()
+    expect(downloads.activeById.get(1)?.progress).toBe(50)
+  })
+
   it('aborts the in-flight status request when polling stops', async () => {
     statusById.set(9, createTrack({ id: 9, status: 'downloading', progress: 10 }))
     const downloads = useDownloadsStore()

@@ -5,6 +5,7 @@ import type { LocationQuery } from 'vue-router'
 import { createAbortGroup } from '@/api/client'
 import { deleteTrack as deleteTrackRequest, listTracks } from '@/api/tracks-api'
 import { useAuthStore } from '@/stores/auth.store'
+import { useNotificationsStore } from '@/stores/notifications.store'
 import { usePlayerStore } from '@/stores/player.store'
 import { ApiError, isApiError } from '@/types/errors'
 import type { Track, TrackListQuery, TrackSortField, TrackSortOrder } from '@/types/track'
@@ -255,7 +256,13 @@ export const useLibraryStore = defineStore('library', () => {
         if (signal.aborted || (isApiError(cause) && cause.aborted)) {
           return []
         }
-        return [] as Track[]
+        // Тихий возврат неотличим от конца списка: при плохой сети
+        // бесконечный список просто перестал бы расти без объяснения.
+        useNotificationsStore().push(
+          'Не удалось догрузить треки — повторите прокруткой',
+          'warning',
+        )
+        return []
       } finally {
         if (!signal.aborted) {
           isLoadingNextPage.value = false
@@ -267,7 +274,11 @@ export const useLibraryStore = defineStore('library', () => {
     try {
       return await request
     } finally {
-      nextPagePromise = null
+      // Sentinel-очистка: aborted-вызов предыдущей догрузки не должен
+      // занулить промис нового вызова (см. profile.store, тот же паттерн).
+      if (nextPagePromise === request) {
+        nextPagePromise = null
+      }
     }
   }
 

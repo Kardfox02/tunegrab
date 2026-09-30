@@ -12,6 +12,7 @@ class Settings:
     covers_dir: Path
     thumbnails_dir: Path
     logs_dir: Path
+    frontend_dist_dir: Path
     ffmpeg_path: str
     secret_key: str
     production: bool
@@ -48,6 +49,10 @@ def load_settings() -> Settings:
     backend_dir = Path(__file__).resolve().parents[1]
     downloads = backend_dir / "downloads"
     bundled_ffmpeg = backend_dir / "ffmpeg.exe"
+    # Собранная SPA (frontend/dist): по умолчанию рядом с backend, путь
+    # переопределяется env TUNEGRAB_DIST_DIR. Каталог может не существовать —
+    # тогда бэк работает как чистый API (раздача фронта отключена).
+    default_dist = backend_dir.parent / "frontend" / "dist"
     configured_origins = os.getenv(
         "TUNEGRAB_ALLOWED_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,"
@@ -65,6 +70,7 @@ def load_settings() -> Settings:
         covers_dir=downloads / "covers",
         thumbnails_dir=downloads / "thumbnails",
         logs_dir=backend_dir / "logs",
+        frontend_dist_dir=Path(os.getenv("TUNEGRAB_DIST_DIR", str(default_dist))),
         ffmpeg_path=os.getenv("TUNEGRAB_FFMPEG", str(bundled_ffmpeg if bundled_ffmpeg.is_file() else "ffmpeg")),
         secret_key=_load_secret(backend_dir / "secret_key.txt"),
         production=os.getenv("TUNEGRAB_ENV", "development") == "production",

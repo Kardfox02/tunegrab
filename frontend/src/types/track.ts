@@ -21,6 +21,30 @@ export const ACTIVE_TRACK_STATUSES = [
 
 export const TERMINAL_TRACK_STATUSES = ['done', 'error', 'cancelled'] as const satisfies readonly TrackStatus[]
 
+// Единые словари статусов для UI (TrackRow, DownloadProgress): локальные
+// копии расходились бы при добавлении статуса.
+export const TRACK_STATUS_LABELS: Readonly<Record<TrackStatus, string>> = {
+  pending: 'В очереди',
+  downloading: 'Загрузка',
+  converting: 'Конвертация',
+  finalizing: 'Завершение',
+  done: 'Готов',
+  error: 'Ошибка',
+  cancelled: 'Отменён',
+}
+
+export type StatusBadgeTone = 'accent' | 'success' | 'warning' | 'danger'
+
+export const TRACK_STATUS_TONES: Readonly<Record<TrackStatus, StatusBadgeTone>> = {
+  pending: 'accent',
+  downloading: 'warning',
+  converting: 'warning',
+  finalizing: 'warning',
+  done: 'success',
+  error: 'danger',
+  cancelled: 'danger',
+}
+
 export type TrackSortField =
   | 'created_at'
   | 'title'

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AppIcon from '@/components/AppIcon.vue'
 import { fetchSharedPlaylist } from '@/api/playlists-api'
 import { createAbortGroup } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
@@ -138,17 +139,7 @@ watch(token, () => void load(), { immediate: true })
                 class="shared-view__cover"
               >
               <span v-else class="shared-view__cover shared-view__cover--placeholder" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M9 18V6.5L19 5v11.5"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
-                  <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
-                </svg>
+                <AppIcon name="note" />
               </span>
               <span class="shared-view__info">
                 <span class="shared-view__title">{{ track.title }}</span>

@@ -2,11 +2,14 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import AppIcon from './AppIcon.vue'
+import CoverPlaceholder from './CoverPlaceholder.vue'
 import DownloadProgress from './DownloadProgress.vue'
 import { useIsDesktop } from '@/composables/useMediaQuery'
 import { getCachedCoverColor, getCoverAccentColor } from '@/services/cover-color.service'
 import { usePlayerStore } from '@/stores/player.store'
-import type { Track, TrackStatus } from '@/types/track'
+import type { Track } from '@/types/track'
+import { TRACK_STATUS_LABELS, TRACK_STATUS_TONES } from '@/types/track'
+import { formatDuration } from '@/utils/format'
 
 const props = withDefaults(
   defineProps<{
@@ -40,9 +43,6 @@ const isCurrentPlaying = computed(() => isCurrent.value && props.isPlaying === t
 // (offscreen-строки не качают обложки — сохраняется смысл loading="lazy").
 const accent = ref<string | null>(null)
 const accentBump = ref(0)
-// Битая обложка: ловим error у <img> и переключаемся на SVG-заглушку.
-// Сброс — при смене cover_url (новая обложка могла загрузиться нормально).
-const coverFailed = ref(false)
 
 function onCoverLoaded(): void {
   void getCoverAccentColor(props.track.cover_url as string).then((color) => {
@@ -56,7 +56,6 @@ function onCoverLoaded(): void {
 watch(
   () => props.track.cover_url,
   (coverUrl) => {
-    coverFailed.value = false
     accentBump.value += 1
     // Синхронная гидратация из кэша (без загрузки Image).
     accent.value = getCachedCoverColor(coverUrl ?? '') ?? null
@@ -69,25 +68,8 @@ const rowAccent = computed(() => {
   return accent.value ?? 'var(--color-accent)'
 })
 
-const statusLabels: Record<TrackStatus, string> = {
-  pending: 'В очереди',
-  downloading: 'Загрузка',
-  converting: 'Конвертация',
-  finalizing: 'Завершение',
-  done: 'Готов',
-  error: 'Ошибка',
-  cancelled: 'Отменён',
-}
-
-const statusTones: Record<TrackStatus, 'accent' | 'success' | 'warning' | 'danger'> = {
-  pending: 'accent',
-  downloading: 'warning',
-  converting: 'warning',
-  finalizing: 'warning',
-  done: 'success',
-  error: 'danger',
-  cancelled: 'danger',
-}
+const statusLabels = TRACK_STATUS_LABELS
+const statusTones = TRACK_STATUS_TONES
 
 const isPlayable = computed(() => props.track.status === 'done' && Boolean(props.track.audio_url))
 
@@ -158,16 +140,7 @@ onUnmounted(() => {
 
 defineExpose({ rowElement })
 
-const durationLabel = computed(() => {
-  const duration = props.track.duration
-  if (duration === null) {
-    return '—'
-  }
-  const totalSeconds = Math.round(duration)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = String(totalSeconds % 60).padStart(2, '0')
-  return `${minutes}:${seconds}`
-})
+const durationLabel = computed(() => formatDuration(props.track.duration))
 </script>
 
 <template>
@@ -196,28 +169,7 @@ const durationLabel = computed(() => {
     </span>
 
     <div class="track-row__cover" aria-hidden="true">
-      <!-- @error: битый cover_url не должен оставлять сломанную иконку —
-           скрываем img, взамен отрисовывается SVG-заглушка. -->
-      <img
-        v-if="track.cover_url && !coverFailed"
-        :src="track.cover_url"
-        alt=""
-        loading="lazy"
-        decoding="async"
-        @load="onCoverLoaded"
-        @error="coverFailed = true"
-      >
-      <svg v-else viewBox="0 0 24 24" fill="none">
-        <path
-          d="M9 18V6.5L19 5v11.5"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
-        <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
-      </svg>
+      <CoverPlaceholder :src="track.cover_url" @load="onCoverLoaded" />
 
       <span v-if="isCurrent" class="track-row__cover-overlay" aria-hidden="true"></span>
 

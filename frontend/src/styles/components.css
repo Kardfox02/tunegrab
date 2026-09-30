@@ -572,6 +572,12 @@
   list-style: none;
 }
 
+/* Распорки окна-виртуализации TrackList: держат высоту неотрендеренных строк. */
+.track-list__spacer {
+  list-style: none;
+  pointer-events: none;
+}
+
 .track-row {
   position: relative;
   display: grid;

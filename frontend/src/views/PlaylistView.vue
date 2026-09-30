@@ -5,14 +5,12 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
+import PlaylistTrackPicker from '@/components/PlaylistTrackPicker.vue'
 import TrackList from '@/components/TrackList.vue'
-import { createAbortGroup } from '@/api/client'
-import { listTracks } from '@/api/tracks-api'
-import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { usePlaylistDragReorder } from '@/composables/usePlaylistDragReorder'
 import { usePlayerStore } from '@/stores/player.store'
 import { usePlaylistsStore } from '@/stores/playlists.store'
 import { useProfileStore } from '@/stores/profile.store'
-import { isApiError } from '@/types/errors'
 import { formatTrackCount } from '@/utils/plural'
 import type { Track } from '@/types/track'
 
@@ -21,10 +19,6 @@ const router = useRouter()
 const playlists = usePlaylistsStore()
 const player = usePlayerStore()
 const profile = useProfileStore()
-
-// Константный пустой массив для «не удаляется» в TrackList: литерал `[]` в
-// шаблоне создаёт новый массив на каждый рендер и роняет мемоизацию пропов.
-const NO_DELETING_IDS: number[] = []
 
 const playlistId = computed(() => {
   const raw = route.params.id
@@ -36,284 +30,29 @@ const isPickerOpen = ref(false)
 
 const isRemovingTrack = ref(false)
 
+// ── Drag&drop reorder (движок в usePlaylistDragReorder) ─────────────────────
+
+const { dragIndex, dropIndex, onRowDragStart, onRowDragEnd } = usePlaylistDragReorder({
+  commit: (from, to) => {
+    const items = [...playlists.detailTracks]
+    const [moved] = items.splice(from, 1)
+    if (!moved) {
+      return
+    }
+    items.splice(to, 0, moved)
+
+    if (playlistId.value === null) {
+      return
+    }
+    void playlists.reorder(playlistId.value, items)
+  },
+})
+
 // ── Пикер треков ────────────────────────────────────────────────────────────
 
-const PICKER_PAGE_LIMIT = 50
-const PICKER_DEBOUNCE_MS = 350
-
-// Состояние пикера локальное: одноразовый UI-стейт, не претендует на место
-// в глобальном store. Запросы идут мимо library.store — его query/sort не трогаем.
-// pickerResults — единый источник данных: и первый запрос при открытии,
-// и поиск, и догрузка при скролле пишут в него.
-const pickerResults = ref<Track[]>([])
-const pickerTotal = ref(0)
-const pickerCursor = ref(0)
-const isLoadingPickerPage = ref(false)
-const pickerError = ref<string | null>(null)
-const pickerQuery = ref('')
-const pickerNextPagePromise: { current: Promise<void> | null } = { current: null }
-
-const pickerAbortGroup = createAbortGroup()
-let pickerDebounceTimer: number | null = null
-
-const inPlaylistIds = computed(() => new Set(playlists.detailTracks.map((track) => track.id)))
-
-// Уже добавленные треки скрываются из выдачи (клиентский фильтр).
-const pickerVisibleResults = computed(() =>
-  pickerResults.value.filter((track) => !inPlaylistIds.value.has(track.id)),
-)
-
-const hasMorePickerResults = computed(() => pickerCursor.value < pickerTotal.value)
-
-async function loadPickerPage(): Promise<void> {
-  if (isLoadingPickerPage.value || !isPickerOpen.value) {
-    return
-  }
-
-  // Дедупликация параллельных вызовов — один Promise (как loadNextLikes).
-  if (pickerNextPagePromise.current) {
-    return pickerNextPagePromise.current
-  }
-
-  let request: Promise<void> = Promise.resolve()
-  request = (async () => {
-    isLoadingPickerPage.value = true
-    try {
-      const query = pickerQuery.value.trim()
-      const signal = pickerAbortGroup.nextSignal()
-      const response = await listTracks(
-        {
-          q: query.length > 0 ? query : undefined,
-          limit: PICKER_PAGE_LIMIT,
-          offset: pickerCursor.value,
-        },
-        signal,
-      )
-      if (signal.aborted) {
-        return
-      }
-      if (!Array.isArray(response?.items)) {
-        throw new Error('Malformed tracks response')
-      }
-
-      // Offset-пагинация + скрытие добавленных дают дубли между партиями — фильтруем.
-      const knownIds = new Set([
-        ...pickerResults.value.map((track) => track.id),
-        ...inPlaylistIds.value,
-      ])
-      const fresh = response.items.filter((track) => !knownIds.has(track.id))
-      pickerResults.value.push(...fresh)
-      pickerCursor.value += response.items.length
-      pickerTotal.value = response.total
-      pickerError.value = null
-    } catch (error: unknown) {
-      if (isApiError(error) && error.aborted) {
-        return
-      }
-      pickerError.value = isApiError(error) ? error.detail : 'Не удалось загрузить треки'
-    } finally {
-      isLoadingPickerPage.value = false
-      if (pickerNextPagePromise.current === request) {
-        pickerNextPagePromise.current = null
-      }
-    }
-  })()
-
-  pickerNextPagePromise.current = request
-  return request
+function togglePicker(): void {
+  isPickerOpen.value = !isPickerOpen.value
 }
-
-function runPickerSearch(): void {
-  // Новый поиск сбрасывает состояние, но in-flight запрос предыдущего поиска
-  // мог ещё лететь: его ранний `return` по isLoadingPickerPage вернул бы
-  // Promise старого запроса, а его ответ (без aborted-проверки) дописался бы
-  // в сброшенный список. Абортим — старый ответ отбрасывается корректно.
-  pickerAbortGroup.nextSignal()
-  isLoadingPickerPage.value = false
-  pickerNextPagePromise.current = null
-  pickerCursor.value = 0
-  pickerTotal.value = 0
-  pickerResults.value = []
-  void loadPickerPage()
-}
-
-function resetPickerState(): void {
-  if (pickerDebounceTimer !== null) {
-    window.clearTimeout(pickerDebounceTimer)
-    pickerDebounceTimer = null
-  }
-  pickerAbortGroup.abort()
-  pickerResults.value = []
-  pickerCursor.value = 0
-  pickerTotal.value = 0
-  pickerError.value = null
-  pickerQuery.value = ''
-}
-
-function openPicker(): void {
-  resetPickerState()
-  isPickerOpen.value = true
-  void loadPickerPage()
-}
-
-function closePicker(): void {
-  isPickerOpen.value = false
-}
-
-watch(pickerQuery, () => {
-  if (pickerDebounceTimer !== null) {
-    window.clearTimeout(pickerDebounceTimer)
-  }
-  pickerDebounceTimer = window.setTimeout(() => {
-    pickerDebounceTimer = null
-    if (isPickerOpen.value) {
-      runPickerSearch()
-    }
-  }, PICKER_DEBOUNCE_MS)
-})
-
-onUnmounted(() => {
-  if (pickerDebounceTimer !== null) {
-    window.clearTimeout(pickerDebounceTimer)
-  }
-  pickerAbortGroup.abort()
-})
-
-const pickerSentinel = ref<HTMLElement | null>(null)
-
-useInfiniteScroll({
-  target: pickerSentinel,
-  onIntersect: () => void loadPickerPage(),
-  isDisabled: () =>
-    !isPickerOpen.value || isLoadingPickerPage.value || !hasMorePickerResults.value,
-})
-
-async function addTrackToPlaylist(track: Track): Promise<void> {
-  if (playlistId.value === null) {
-    return
-  }
-  await playlists.addTrack(playlistId.value, track.id)
-}
-
-// ── Drag&drop reorder ───────────────────────────────────────────────────────
-
-const dragIndex = ref<number | null>(null)
-const dropIndex = ref<number | null>(null)
-
-const AUTO_SCROLL_EDGE = 80
-const AUTO_SCROLL_MAX_SPEED = 14
-
-let autoScrollPointerY = 0
-// Жест начинается с pointerdown, но реальные координаты приходят только с
-// первым pointermove. Пока их нет — автоскролл «спит»: нулевая координата
-// ложится в верхнюю кромку и давал бы рывок списка вверх в начале drag.
-let autoScrollHasSample = false
-let autoScrollRaf: number | null = null
-
-function autoScrollStep(): void {
-  if (dragIndex.value === null) {
-    autoScrollRaf = null
-    return
-  }
-
-  let speed = 0
-  if (autoScrollHasSample) {
-    const edgeBottom = window.innerHeight - AUTO_SCROLL_EDGE
-    if (autoScrollPointerY < AUTO_SCROLL_EDGE) {
-      // Чем ближе к краю — тем быстрее (1 у границы зоны, MAX у самого края).
-      speed = -Math.round(AUTO_SCROLL_MAX_SPEED * (1 - autoScrollPointerY / AUTO_SCROLL_EDGE) + 1)
-    } else if (autoScrollPointerY > edgeBottom) {
-      const depth = (autoScrollPointerY - edgeBottom) / AUTO_SCROLL_EDGE
-      speed = Math.round(AUTO_SCROLL_MAX_SPEED * depth + 1)
-    }
-  }
-
-  if (speed !== 0) {
-    window.scrollBy(0, speed)
-  }
-  autoScrollRaf = window.requestAnimationFrame(autoScrollStep)
-}
-
-function onDragPointerMove(event: PointerEvent): void {
-  autoScrollPointerY = event.clientY
-  autoScrollHasSample = true
-
-  // Deterministic hit-test: у тач-указателей события не ретаргетятся, а
-  // pointerenter соседних строк блокируется неявным pointer capture —
-  // поэтому «над какой строкой палец» узнаём напрямую, по координатам.
-  const target = document.elementFromPoint(event.clientX, event.clientY)
-  const indexAttr = target?.closest('li[data-drag-index]')?.getAttribute('data-drag-index')
-  const index = Number(indexAttr)
-  if (indexAttr !== null && indexAttr !== undefined && Number.isFinite(index)) {
-    onRowDragOver(index)
-  }
-}
-
-function startAutoScrollTracking(): void {
-  autoScrollPointerY = 0
-  autoScrollHasSample = false
-  document.addEventListener('pointermove', onDragPointerMove)
-  document.addEventListener('pointercancel', onDragPointerCancel)
-  if (autoScrollRaf === null) {
-    autoScrollRaf = window.requestAnimationFrame(autoScrollStep)
-  }
-}
-
-function stopAutoScrollTracking(): void {
-  document.removeEventListener('pointermove', onDragPointerMove)
-  document.removeEventListener('pointercancel', onDragPointerCancel)
-  if (autoScrollRaf !== null) {
-    window.cancelAnimationFrame(autoScrollRaf)
-    autoScrollRaf = null
-  }
-}
-
-// Системная отмена жеста (входящий звонок, системный свайп): pointerup не
-// приходит, и drag Index/RAF-цикл зависали до ухода со страницы.
-function onDragPointerCancel(): void {
-  dragIndex.value = null
-  dropIndex.value = null
-  stopAutoScrollTracking()
-}
-
-function onRowDragStart(index: number): void {
-  dragIndex.value = index
-  startAutoScrollTracking()
-}
-
-function onRowDragOver(index: number): void {
-  if (dragIndex.value === null || dragIndex.value === index) {
-    return
-  }
-  dropIndex.value = index
-}
-
-async function onRowDragEnd(): Promise<void> {
-  stopAutoScrollTracking()
-  const from = dragIndex.value
-  const to = dropIndex.value
-  dragIndex.value = null
-  dropIndex.value = null
-
-  if (from === null || to === null || from === to) {
-    return
-  }
-
-  const items = [...playlists.detailTracks]
-  const [moved] = items.splice(from, 1)
-  if (!moved) {
-    return
-  }
-  items.splice(to, 0, moved)
-
-  if (playlistId.value === null) {
-    return
-  }
-  void playlists.reorder(playlistId.value, items)
-}
-
-onUnmounted(stopAutoScrollTracking)
-
 // ── Share ───────────────────────────────────────────────────────────────────
 
 const shareUrl = computed(() => playlists.detail?.share_url ?? null)
@@ -509,60 +248,17 @@ watch(
       <button
         class="playlist-view__add-track"
         type="button"
-        @click="isPickerOpen ? closePicker() : openPicker()"
+        @click="togglePicker"
       >
         <AppIcon name="plus" />
         <span>{{ isPickerOpen ? 'Скрыть' : 'Добавить трек' }}</span>
       </button>
 
-      <div v-if="isPickerOpen" class="playlist-picker">
-        <input
-          v-model="pickerQuery"
-          class="input playlist-picker__search"
-          type="search"
-          placeholder="Поиск в библиотеке…"
-          aria-label="Поиск трека в библиотеке"
-        >
-        <p v-if="pickerError" class="playlist-picker__error">{{ pickerError }}</p>
-        <p v-else-if="pickerVisibleResults.length === 0 && !isLoadingPickerPage" class="playlist-picker__empty">
-          {{ pickerQuery.trim() ? 'Ничего не найдено' : 'Все треки уже в плейлисте' }}
-        </p>
-        <ul v-else class="playlist-picker__list">
-          <li v-for="track in pickerVisibleResults" :key="track.id">
-            <button type="button" class="playlist-picker__item" @click="addTrackToPlaylist(track)">
-              <img
-                v-if="track.cover_url"
-                :src="track.cover_url"
-                alt=""
-                loading="lazy"
-                decoding="async"
-                class="playlist-picker__cover"
-              >
-              <span v-else class="playlist-picker__cover playlist-picker__cover--placeholder" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M9 18V6.5L19 5v11.5"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
-                  <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
-                </svg>
-              </span>
-              <span class="playlist-picker__info">
-                <span class="playlist-picker__title">{{ track.title }}</span>
-                <span class="playlist-picker__author">{{ track.author }}</span>
-              </span>
-              <AppIcon name="plus" class="playlist-picker__add-icon" />
-            </button>
-          </li>
-        </ul>
-        <div v-if="hasMorePickerResults" ref="pickerSentinel" class="library-view__sentinel">
-          <span v-if="isLoadingPickerPage" class="spinner" aria-hidden="true"></span>
-        </div>
-      </div>
+      <PlaylistTrackPicker
+        v-if="isPickerOpen"
+        :open="isPickerOpen"
+        :playlist-id="playlistId"
+      />
 
       <p v-if="playlists.detailTracks.length === 0" class="settings-section__empty">
         Плейлист пуст — добавьте треки кнопкой выше.
@@ -571,7 +267,6 @@ watch(
       <TrackList
         v-else
         :tracks="playlists.detailTracks"
-        :deleting-ids="NO_DELETING_IDS"
         :delete-error="null"
         :current-track-id="player.currentTrack?.id ?? null"
         :is-playing="player.isPlaying"

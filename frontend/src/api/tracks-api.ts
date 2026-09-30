@@ -1,5 +1,9 @@
-import { apiClient, request } from './client'
+import { hasArray, hasNumber, hasString, request } from './client'
 import type { Track, TrackListQuery, TrackListResponse } from '@/types/track'
+
+// Загрузка файлаmultipart — FormData уходит без json-формы тела.
+const isTrackBody = (body: unknown): boolean =>
+  hasNumber(body, 'id') && hasString(body, 'status') && hasString(body, 'title')
 
 export async function listTracks(
   query: TrackListQuery = {},
@@ -9,13 +13,16 @@ export async function listTracks(
     url: '/tracks',
     params: { ...query },
     signal,
-    assertShape: (body) => Array.isArray((body as TrackListResponse | null)?.items),
+    assertShape: (body) => hasArray(body, 'items'),
     malformedMessage: 'Malformed tracks response',
   })
 }
 
 export async function deleteTrack(trackId: number): Promise<void> {
-  await apiClient.delete(`/tracks/${trackId}`)
+  await request<void>({
+    url: `/tracks/${trackId}`,
+    method: 'delete',
+  })
 }
 
 export async function uploadTrack(file: File): Promise<Track> {
@@ -25,5 +32,7 @@ export async function uploadTrack(file: File): Promise<Track> {
     url: '/tracks/upload',
     method: 'post',
     data: formData,
+    assertShape: isTrackBody,
+    malformedMessage: 'Malformed upload response',
   })
 }

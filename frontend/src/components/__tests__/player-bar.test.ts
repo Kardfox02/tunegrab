@@ -223,13 +223,20 @@ describe('PlayerBar', () => {
     expect(mediaMocks.pause).toHaveBeenCalledOnce()
   })
 
-  it('seeks from the slider input', async () => {
+  it('previews seek on input and commits only on change', async () => {
     const { wrapper, player, audio } = mountBar()
     player.playTrack(createTrack())
     await flushPromises()
 
     const slider = wrapper.get('.player-bar__seek .player-bar__slider')
-    await slider.setValue(45)
+    ;(slider.element as HTMLInputElement).value = '45'
+    await slider.trigger('input')
+
+    // Live-превью обновляет только UI: в стор и аудио не коммитится.
+    expect(player.position).toBe(0)
+    expect(audio.currentTime).not.toBe(45)
+
+    await slider.trigger('change')
 
     expect(player.position).toBe(45)
     expect(audio.currentTime).toBe(45)

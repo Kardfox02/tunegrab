@@ -18,6 +18,7 @@ from app.config import settings
 from app.database import dispose_database
 from app.logging_setup import configure_logging
 from app.middleware.origin import OriginMiddleware
+from app.static_site import mount_frontend
 from app.storage import ensure_directories
 from app.download.manager import download_manager
 from app.services.stream_service import (
@@ -141,3 +142,9 @@ async def playlist_order_mismatch_handler(
 async def health() -> dict[str, str]:
     storage_ok = settings.downloads_dir.is_dir() and settings.covers_dir.is_dir()
     return {"status": "ok", "storage": "ok" if storage_ok else "warn"}
+
+
+# Раздача собранного SPA — ПОСЛЕДНЕЙ: роутеры, /covers и /health регистрируются
+# раньше, а маршруты Starlette матчатся по порядку вставки (catch-all затенил
+# бы всё, что объявлено после него).
+mount_frontend(app, settings.frontend_dist_dir)

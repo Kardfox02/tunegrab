@@ -104,8 +104,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function create(name: string): Promise<PlaylistSummary | null> {
+    const epochAtStart = dataEpoch
     try {
       const created = await createPlaylist(name)
+      if (epochAtStart !== dataEpoch) {
+        return created
+      }
       playlists.value = [...playlists.value, created]
       isLoaded.value = true
       notifications.push(`Плейлист «${created.name}» создан`, 'success')
@@ -118,8 +122,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function rename(id: number, name: string): Promise<boolean> {
+    const epochAtStart = dataEpoch
     try {
       const updated = await renamePlaylist(id, name)
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       if (detail.value?.id === id) {
         detail.value = updated
       }
@@ -135,8 +143,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function remove(id: number): Promise<boolean> {
+    const epochAtStart = dataEpoch
     try {
       await deletePlaylist(id)
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       playlists.value = playlists.value.filter((item) => item.id !== id)
       if (detail.value?.id === id) {
         detail.value = null
@@ -150,8 +162,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function addTrack(playlistId: number, trackId: number): Promise<boolean> {
+    const epochAtStart = dataEpoch
     try {
       const updated = await addPlaylistTrack(playlistId, trackId)
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       if (detail.value?.id === playlistId) {
         detail.value = updated
       }
@@ -168,8 +184,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function removeTrack(playlistId: number, trackId: number): Promise<boolean> {
+    const epochAtStart = dataEpoch
     try {
       await removePlaylistTrack(playlistId, trackId)
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       if (detail.value?.id === playlistId) {
         const items = detail.value.items.filter((track) => track.id !== trackId)
         detail.value = { ...detail.value, items }
@@ -218,8 +238,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function share(playlistId: number): Promise<string | null> {
+    const epochAtStart = dataEpoch
     try {
       const updated = await createShareLink(playlistId)
+      if (epochAtStart !== dataEpoch) {
+        return updated.share_url
+      }
       playlists.value = playlists.value.map((item) =>
         item.id === playlistId ? { ...item, share_url: updated.share_url } : item,
       )
@@ -234,8 +258,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
   }
 
   async function revokeShare(playlistId: number): Promise<boolean> {
+    const epochAtStart = dataEpoch
     try {
       await revokeShareLink(playlistId)
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       playlists.value = playlists.value.map((item) =>
         item.id === playlistId ? { ...item, share_url: null } : item,
       )
@@ -267,8 +295,12 @@ export const usePlaylistsStore = defineStore('playlists', () => {
 
   // Отписка от чужого плейлиста: убирает плитку и detail локально после 204.
   async function unsubscribe(playlistId: number): Promise<boolean> {
+    const epochAtStart = dataEpoch
     try {
       await unsubscribeFromPlaylist(playlistId)
+      if (epochAtStart !== dataEpoch) {
+        return true
+      }
       playlists.value = playlists.value.filter((item) => item.id !== playlistId)
       if (detail.value?.id === playlistId) {
         detail.value = null

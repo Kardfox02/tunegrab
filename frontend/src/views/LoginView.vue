@@ -24,10 +24,17 @@ function getRedirectPath(): string {
 
 async function submit(): Promise<void> {
   errorMessage.value = ''
+
+  // Клиентская проверка до запроса: пустая форма не уходит на сервер.
+  if (username.value.trim().length === 0 || password.value.length === 0) {
+    errorMessage.value = 'Введите имя пользователя и пароль.'
+    return
+  }
+
   isSubmitting.value = true
 
   try {
-    await auth.login({ username: username.value, password: password.value })
+    await auth.login({ username: username.value.trim(), password: password.value })
     await router.replace(getRedirectPath())
   } catch (error: unknown) {
     if (isApiError(error)) {

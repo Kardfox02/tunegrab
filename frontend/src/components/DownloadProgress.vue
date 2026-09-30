@@ -1,19 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { TrackStatus } from '@/types/track'
+import { TRACK_STATUS_LABELS } from '@/types/track'
 
-const props = defineProps<{ status: TrackStatus; progress: number }>()
-
-const statusLabels: Partial<Record<TrackStatus, string>> = {
-  pending: 'В очереди',
-  downloading: 'Загрузка',
-  converting: 'Конвертация',
-  finalizing: 'Завершение',
-}
+const props = defineProps<{ status: keyof typeof TRACK_STATUS_LABELS; progress: number }>()
 
 const percent = computed(() => Math.min(100, Math.max(0, Math.round(props.progress))))
-const label = computed(() => statusLabels[props.status] ?? 'Загрузка')
+const label = computed(() => TRACK_STATUS_LABELS[props.status] ?? 'Загрузка')
 </script>
 
 <template>

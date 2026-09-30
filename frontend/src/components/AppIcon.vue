@@ -1,6 +1,6 @@
 <script setup lang="ts">
 withDefaults(
-  defineProps<{ name: 'book' | 'search' | 'gear' | 'panel' | 'play' | 'pause' | 'volume' | 'trash' | 'skip-prev' | 'skip-next' | 'heart' | 'user' | 'playlist' | 'plus' | 'grip' | 'close' | 'shuffle'; filled?: boolean }>(),
+  defineProps<{ name: 'book' | 'search' | 'gear' | 'panel' | 'play' | 'pause' | 'volume' | 'trash' | 'skip-prev' | 'skip-next' | 'heart' | 'user' | 'playlist' | 'plus' | 'grip' | 'close' | 'shuffle' | 'note'; filled?: boolean }>(),
   { filled: false },
 )
 </script>
@@ -76,6 +76,11 @@ withDefaults(
       <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
       <circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none" />
       <circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none" />
+    </template>
+    <template v-else-if="name === 'note'">
+      <path d="M9 18V6.5L19 5v11.5" />
+      <circle cx="6.5" cy="18" r="2.5" fill="currentColor" />
+      <circle cx="16.5" cy="16.5" r="2.5" fill="currentColor" />
     </template>
     <template v-else-if="name === 'shuffle'">
       <path d="M16 3h5v5" />

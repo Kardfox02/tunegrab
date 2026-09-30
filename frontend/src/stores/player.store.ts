@@ -75,6 +75,9 @@ let audioController: PlayerAudioController | null = null
 let queueSupplier: ((lastTrackId: number) => Promise<Track[]>) | null = null
 let playbackEpoch = 0
 let extensionInFlight = false
+// Поставщик очереди исчерпан в текущем контексте (вернул ноль свежих треков):
+// кэш предотвращает лишний запрос supplier на каждом resume после паузы.
+let contextExhausted = false
 let contextList: Track[] = []
 let contextIndex = -1
 // История проигранных треков (от старых к новым, ограничена): для
@@ -208,9 +211,16 @@ let playedTrackIds = new Set<number>()
     return track.status === 'done' && track.audio_url !== null
   }
 
+  // Честная проверка вместо non-null-assertion: индекс за пределами
+  // массива или undefined-элемент не допускаются в playTrack.
+  function isPlayableTrackAt(index: number): boolean {
+    const track = contextList[index]
+    return track !== undefined && track.status === 'done' && track.audio_url !== null
+  }
+
   function findPlayableForward(from: number): number {
     for (let index = from + 1; index < contextList.length; index += 1) {
-      if (isPlayable(contextList[index] as Track)) {
+      if (isPlayableTrackAt(index)) {
         return index
       }
     }
@@ -219,7 +229,7 @@ let playedTrackIds = new Set<number>()
 
   function findPlayableBackward(from: number): number {
     for (let index = from - 1; index >= 0; index -= 1) {
-      if (isPlayable(contextList[index] as Track)) {
+      if (isPlayableTrackAt(index)) {
         return index
       }
     }
@@ -258,6 +268,7 @@ let playedTrackIds = new Set<number>()
     queueSupplier = null
     playbackEpoch += 1
     extensionInFlight = false
+    contextExhausted = false
     resetRecovery()
     reportedPlayTrackId = null
     resetListenedTime()
@@ -273,7 +284,7 @@ let playedTrackIds = new Set<number>()
     isLoading.value = false
     playbackError.value = null
     trackAccent.value = null
-    mediaSession.setTrack(null)
+    mediaSession.dispose()
   }
 
   function playTrack(track: Track): void {
@@ -289,6 +300,7 @@ let playedTrackIds = new Set<number>()
 
     playbackEpoch += 1
     playbackError.value = null
+    contextExhausted = false
     resetRecovery()
     reportedPlayTrackId = null
     resetListenedTime()
@@ -345,12 +357,13 @@ let playedTrackIds = new Set<number>()
     const copy = [...items]
     for (let index = copy.length - 1; index > 0; index -= 1) {
       const swapIndex = Math.floor(Math.random() * (index + 1))
-      const swapped = copy[index]
-      if (swapped === undefined) {
+      const value = copy[index]
+      const replacement = copy[swapIndex]
+      if (value === undefined || replacement === undefined) {
         continue
       }
-      copy[index] = copy[swapIndex] as Track
-      copy[swapIndex] = swapped
+      copy[index] = replacement
+      copy[swapIndex] = value
     }
     return copy
   }
@@ -367,7 +380,10 @@ let playedTrackIds = new Set<number>()
       return
     }
 
-    const head = playable[0] as Track
+    const head = playable[0]
+    if (head === undefined) {
+      return
+    }
     playFromList(head, playable)
   }
 
@@ -460,9 +476,12 @@ let playedTrackIds = new Set<number>()
   function playNext(): void {
     const nextIndex = findPlayableForward(contextIndex)
     if (nextIndex >= 0) {
-      contextIndex = nextIndex
-      playTrack(contextList[nextIndex] as Track)
-      return
+      const next = contextList[nextIndex]
+      if (next !== undefined) {
+        contextIndex = nextIndex
+        playTrack(next)
+        return
+      }
     }
 
     if (queue.value.length > 0) {
@@ -473,9 +492,12 @@ let playedTrackIds = new Set<number>()
   function playPrevious(): void {
     const prevIndex = findPlayableBackward(contextIndex)
     if (prevIndex >= 0) {
-      contextIndex = prevIndex
-      playTrack(contextList[prevIndex] as Track)
-      return
+      const prev = contextList[prevIndex]
+      if (prev !== undefined) {
+        contextIndex = prevIndex
+        playTrack(prev)
+        return
+      }
     }
 
     // Фолбэк истории — только когда текущий трек вне контекста (режим ручной
@@ -531,6 +553,8 @@ let playedTrackIds = new Set<number>()
       const fresh = fetched.filter((item) => isPlayable(item) && !knownIds.has(item.id))
       if (fresh.length > 0) {
         queue.value = [...queue.value, ...fresh]
+      } else {
+        contextExhausted = true
       }
     } catch {
       // Prefetch — инициативная догрузка; при неудаче сработает путь через ended.
@@ -553,7 +577,7 @@ let playedTrackIds = new Set<number>()
     }
 
     const hasContextNext = findPlayableForward(contextIndex) >= 0
-    if (!hasContextNext) {
+    if (!hasContextNext && !contextExhausted) {
       void extendContext()
     }
   }
@@ -615,9 +639,12 @@ let playedTrackIds = new Set<number>()
 
     const nextIndex = findPlayableForward(contextIndex)
     if (nextIndex >= 0) {
-      contextIndex = nextIndex
-      playTrack(contextList[nextIndex] as Track)
-      return
+      const next = contextList[nextIndex]
+      if (next !== undefined) {
+        contextIndex = nextIndex
+        playTrack(next)
+        return
+      }
     }
 
     const supplier = queueSupplier
@@ -657,12 +684,11 @@ let playedTrackIds = new Set<number>()
     }
   }
 
-  function audioFailed(message: string): void {
+  function audioFailed(_message: string): void {
     isPlaying.value = false
     // Обрыв сети — штатная ситуация для фонового стрима: сначала восстановление,
     // постоянная ошибка выставляется только после исчерпания попыток.
     scheduleRecovery()
-    void message
   }
 
   auth.onSessionTeardown(() => reset())
@@ -676,11 +702,15 @@ let playedTrackIds = new Set<number>()
         return
       }
       const epochAtStart = playbackEpoch
-      void getCoverAccentColor(coverUrl).then((color) => {
-        if (epochAtStart === playbackEpoch && currentTrack.value?.cover_url === coverUrl && color) {
-          trackAccent.value = color
-        }
-      })
+      void getCoverAccentColor(coverUrl)
+        .then((color) => {
+          if (epochAtStart === playbackEpoch && currentTrack.value?.cover_url === coverUrl && color) {
+            trackAccent.value = color
+          }
+        })
+        .catch(() => {
+          // Извлечение цвета — несущественный визуальный штрих: молча пропускаем.
+        })
     },
     { immediate: true },
   )

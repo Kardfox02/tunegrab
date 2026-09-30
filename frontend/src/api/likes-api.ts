@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { hasArray, request } from './client'
 import type { LikedTrackIdsResponse, LikeListResponse } from '@/types/likes'
 
 export interface LikesQuery {
@@ -7,26 +7,35 @@ export interface LikesQuery {
 }
 
 export async function fetchLikes(query: LikesQuery = {}, signal?: AbortSignal): Promise<LikeListResponse> {
-  const response = await apiClient.get<LikeListResponse>('/likes', {
+  return request<LikeListResponse>({
+    url: '/likes',
     params: { ...query },
     signal,
+    assertShape: (body) => hasArray(body, 'items'),
+    malformedMessage: 'Malformed likes response',
   })
-  return response.data
 }
 
 export async function fetchLikedTrackIds(signal?: AbortSignal): Promise<number[]> {
-  const response = await apiClient.get<LikedTrackIdsResponse>('/likes/ids', { signal })
-  const trackIds = response.data?.track_ids
-  if (!Array.isArray(trackIds)) {
-    throw new Error('Malformed liked track ids response')
-  }
-  return trackIds
+  const response = await request<LikedTrackIdsResponse>({
+    url: '/likes/ids',
+    signal,
+    assertShape: (body) => hasArray(body, 'track_ids'),
+    malformedMessage: 'Malformed liked track ids response',
+  })
+  return response.track_ids
 }
 
 export async function addLike(trackId: number): Promise<void> {
-  await apiClient.put(`/likes/${trackId}`)
+  await request<void>({
+    url: `/likes/${trackId}`,
+    method: 'put',
+  })
 }
 
 export async function removeLike(trackId: number): Promise<void> {
-  await apiClient.delete(`/likes/${trackId}`)
+  await request<void>({
+    url: `/likes/${trackId}`,
+    method: 'delete',
+  })
 }

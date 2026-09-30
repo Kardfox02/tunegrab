@@ -24,20 +24,31 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   isUnauthorizedHandled = false
 }
 
-// Успешный ответ восстанавливает чувствительность к 401: сессия снова жива,
-// и следующий внезапный 401 должен обрабатываться.
-function notifyRequestSuccess(): void {
+// Публичные эндпоинты: успешный ответ на них не доказывает живость сессии,
+// поэтому посреди волны 401 не должен снимать щит дедупа.
+const publicSuccessPrefixes = ['/covers/', '/playlists/shared/', '/auth/', '/health']
+
+// Успешный ответ на защищённом домене восстанавливает чувствительность к 401:
+// сессия снова жива, и следующий внезапный 401 должен обрабатываться.
+function notifyRequestSuccess(url: string | undefined): void {
+  const path = resolvePath(url)
+  if (publicSuccessPrefixes.some((prefix) => path.startsWith(prefix))) {
+    return
+  }
   isUnauthorizedHandled = false
 }
 
-function getRequestPath(error: AxiosError): string {
-  const url = error.config?.url ?? ''
-
+function resolvePath(url: string | undefined): string {
+  const source = url ?? ''
   try {
-    return new URL(url, window.location.origin).pathname
+    return new URL(source, window.location.origin).pathname
   } catch {
-    return url.split('?')[0] ?? ''
+    return source.split('?')[0] ?? ''
   }
+}
+
+function getRequestPath(error: AxiosError): string {
+  return resolvePath(error.config?.url ?? '')
 }
 
 function shouldHandleUnauthorized(error: AxiosError, apiError: ApiError): boolean {
@@ -47,7 +58,7 @@ function shouldHandleUnauthorized(error: AxiosError, apiError: ApiError): boolea
 
 apiClient.interceptors.response.use(
   (response: AxiosResponse): AxiosResponse => {
-    notifyRequestSuccess()
+    notifyRequestSuccess(response.config?.url)
     return response
   },
   (error: unknown) => {
@@ -91,6 +102,24 @@ export function createAbortGroup(): AbortGroup {
       controller = null
     },
   }
+}
+
+// ── Валидаторы формы тела ответа (для assertShape) ────────────────────────
+
+export function isApiObject(body: unknown): body is Record<string, unknown> {
+  return typeof body === 'object' && body !== null
+}
+
+export function hasArray(body: unknown, prop: string): boolean {
+  return isApiObject(body) && Array.isArray(body[prop])
+}
+
+export function hasString(body: unknown, prop: string): boolean {
+  return isApiObject(body) && typeof body[prop] === 'string'
+}
+
+export function hasNumber(body: unknown, prop: string): boolean {
+  return isApiObject(body) && typeof body[prop] === 'number'
 }
 
 /**

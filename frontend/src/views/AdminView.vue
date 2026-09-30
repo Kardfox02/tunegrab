@@ -228,7 +228,7 @@ onMounted(() => {
             type="password"
             name="new-password"
             autocomplete="new-password"
-            minlength="8"
+            :minlength="PASSWORD_MIN_LENGTH"
             required
             :disabled="isChangingPassword"
           >

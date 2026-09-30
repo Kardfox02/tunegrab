@@ -134,7 +134,8 @@ export const useProfileStore = defineStore('profile', () => {
       return
     }
 
-    if (statsResult.status === 'fulfilled' && statsResult.value && typeof statsResult.value === 'object' && 'play_count' in statsResult.value) {
+    // Форма статистики гарантируется assertShape в events-api.
+    if (statsResult.status === 'fulfilled' && statsResult.value) {
       stats.value = statsResult.value
     } else {
       statsError.value = 'Не удалось загрузить статистику'
@@ -250,9 +251,6 @@ export const useProfileStore = defineStore('profile', () => {
     statsError.value = null
     try {
       const fetched = await fetchListeningStats(periodDays)
-      if (!fetched || typeof fetched !== 'object' || !('play_count' in fetched)) {
-        throw new Error('Malformed stats response')
-      }
       if (requestId !== statsRequestId) {
         // Пришёл более старый запрос — newer запрос уже перезаписал stats.
         return

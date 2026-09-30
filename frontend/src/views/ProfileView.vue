@@ -26,10 +26,6 @@ const profile = useProfileStore()
 const playlists = usePlaylistsStore()
 const router = useRouter()
 
-// Константный пустой массив для «не удаляется» в TrackList: литерал `[]` в
-// шаблоне создаёт новый массив на каждый рендер и роняет мемоизацию пропов.
-const NO_DELETING_IDS: number[] = []
-
 // Период статистики: 24 часа / 7 дней / 30 дней. Выбранный период держим
 // локально — он влияет и на ручное обновление, и на поллинг.
 const STATS_PERIODS = [
@@ -329,7 +325,6 @@ useInfiniteScroll({
       <template v-else-if="profile.hasLikes">
         <TrackList
           :tracks="profile.likedTracks"
-          :deleting-ids="NO_DELETING_IDS"
           :delete-error="null"
           :current-track-id="player.currentTrack?.id ?? null"
           :is-playing="player.isPlaying"

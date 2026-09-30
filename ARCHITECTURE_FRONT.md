@@ -66,7 +66,7 @@ Vite :8080 (host: true, strictPort, allowedHosts — приватный спис
 
 ### Production-сборка
 
-`npm run build` сначала прогоняет `vue-tsc -b` (типизация — часть сборки), затем `vite build` — приложение собирается в `frontend/dist` с хешированными именами ассетов. Раздача собранной сборки backend'ом (mount статики + SPA fallback) **не реализована** — сейчас сервис эксплуатируется в dev-режиме (Vite proxy).
+`npm run build` сначала прогоняет `vue-tsc -b` (типизация — часть сборки), затем `vite build` — приложение собирается в `frontend/dist` с хешированными именами ассетов. Раздача собранной сборки **реализована** — `backend/app/static_site.py`: при наличии `dist` бэк отдаёт и API, и SPA единым процессом (mount `/assets` с immutable-кэшем, корневые файлы без кэша, catch-all → `index.html`; навигация `Accept: text/html` уходит в SPA до маршрутизации — решение коллизии `/playlists/{id}` API↔страницы; API-запросы сохраняют контракты). Без `dist` бэк работает как чистый API (dev через Vite proxy).
 
 ### PWA-манифест
 
@@ -101,10 +101,12 @@ frontend/
     │   ├── AppHeader.vue            # логотип + никнейм-ссылка на /admin (стекло)
     │   ├── AppSidebar.vue           # круглые стеклянные кнопки навигации + тултипы
     │   ├── AppNotifications.vue     # тосты (TransitionGroup, aria-live, стекло)
-    │   ├── AppIcon.vue              # inline-SVG-иконки по имени
-    │   ├── PlayerBar.vue            # владелец <audio>, свайпы, seek/volume
-    │   ├── TrackList.vue            # <ul> из TrackRow (+ drag&drop-проброс)
+    │   ├── AppIcon.vue              # inline-SVG-иконки по имени (включая note-плейсхолдер)
+    │   ├── PlayerBar.vue            # владелец <audio>, свайпы, seek/volume (seek: превью на input, коммит на change)
+    │   ├── TrackList.vue            # <ul> из TrackRow (+ drag&drop-проброс); окно-виртуализация больших списков (>60 строк: видимая полоса + распорки, кэш высот по id)
     │   ├── TrackRow.vue             # строка трека: обложка, статус, удаление, лайк, «в плейлист», drag-handle
+    │   ├── CoverPlaceholder.vue     # img с SVG-заглушкой (PlayerBar/TrackRow), class на img/svg, internal @error-фоллбэк
+    │   ├── PlaylistTrackPicker.vue  # пикер треков плейлиста: поиск с debounce, пагинация, скрытие добавленных
     │   ├── SearchForm.vue           # форма поиска (defineModel, enterkeyhint)
     │   ├── StorageBarChart.vue      # линейчатая шкала хранилища (flex-сегменты, легенда)
     │   ├── YouTubeResultCard.vue    # карточка результата: превью, статус, кнопка
@@ -144,8 +146,10 @@ frontend/
     │   └── admin.ts                 # контракты админ-панели
     ├── composables/
     │   ├── useDebouncedSearch.ts    # debounce + AbortGroup + state машины запроса
+    │   ├── useDebouncedWatch.ts     # watch с дебаунсом, таймер снимается onScopeDispose
     │   ├── usePolling.ts            # createPolling: интервалы, visibilitychange
     │   ├── useInfiniteScroll.ts     # IntersectionObserver-сентинел + ручная проверка при разблокировке
+    │   ├── usePlaylistDragReorder.ts # drag&drop-движок плейлиста: hit-test один на кадр + автоскролл
     │   ├── useMediaQuery.ts         # useMediaQuery / useIsDesktop
     │   ├── useSwipeSwitch.ts        # touch-свайп плеера (prev/next, pointercancel-safe)
     │   └── useAddToPlaylistPopover.ts # общая проводка поповера «в плейлист» (Library/Profile)
@@ -571,19 +575,20 @@ Layout (`styles/layout.css`):
   - заголовок (+ «от {author}» для соавтора) + кнопка «Назад»; «Переименовать» — у обоих; «Отписаться» (danger-кнопка) — только у соавтора;
   - share-блок (`v-if="isOwner"`): создание/копирование (`navigator.clipboard.writeText`; работает только в secure context — на HTTP-доменах clipboard API недоступен и срабатывает fallback `prompt()`; подробности HTTPS-перехода — в личных заметках, не в репозитории)/отзыв ссылки;
   - треки через `TrackList` (play = `player.playOrToggle(track, items)` — очередь = плейлист); удаление трека из плейлиста — **крестик** (`remove-icon="close"` в `TrackRow`), трек остаётся в библиотеке;
-  - **мок-строка «Добавить трек» первой** в секции треков; раскрывает **пикер**: поиск (локальный debounce 350 мс + AbortGroup), партии по 50 с догрузкой при скролле (`useInfiniteScroll` + сентинел внутри пикера), уже добавленные треки **скрываются** (клиентский фильтр + дедупликация партий по id — offset-пагинация даёт дубли), клик → `addTrack` (тост «Трек добавлен в плейлист»; 409 гонки гасится тостом бэка). Состояние пикера локальное в view, запросы идут напрямую через `tracks-api` (library.store не трогается);
-  - **drag&drop reorder**: pointer events по drag-handle (`grip`) **слева от обложки** (отдельная grid-колонка `track-row--draggable` в `TrackRow`, включая desktop-media-override), `pointerdown` на handle → `dragStart`, `pointerenter` строк → `dropIndex`, document `pointerup` → `dragEnd` (**`pointercancel`** → отмена жеста: сброс `dragIndex`/`dropIndex` + остановка автоскролла — без этого системная отмена жеста зависала бы на неопределённый срок); **автоскролл**: во время drag document-`pointermove` + rAF-цикл, курсор в зоне ≤80px от верх/низ вьюпорта прокручивает страницу (скорость растёт у края); drop → оптимистичный `reorder` + `PUT /tracks/order`;
+  - **«Добавить трек»** раскрывает **пикер** — отдельный компонент `PlaylistTrackPicker.vue` (состояние пикера — локальное в компоненте, запросы идут напрямую через `tracks-api`, library.store не трогается): поиск (debounce 350 мс через `useDebouncedWatch` + AbortGroup), партии по 50 с догрузкой при скролле (`useInfiniteScroll` + сентинел внутри пикера), уже добавленные треки **скрываются** (клиентский фильтр + дедупликация партий по id — offset-пагинация даёт дубли), клик → `addTrack` (тост «Трек добавлен в плейлист»; 409 гонки гасится тостом бэка);
+  - **drag&drop reorder**: движок вынесен в `usePlaylistDragReorder` (view — только коммит перестановки через `commit(from, to)`); pointer events по drag-handle (`grip`) **слева от обложки** (отдельная grid-колонка `track-row--draggable` в `TrackRow`, включая desktop-media-override), `pointerdown` на handle → `dragStart`, document `pointermove` + **hit-test `elementFromPoint` один раз на кадр (внутри rAF-цикла)** → `dropIndex`, `pointerup` → `dragEnd` (**`pointercancel`** → отмена жеста: сброс `dragIndex`/`dropIndex` + остановка автоскролла — без этого системная отмена жеста зависала бы на неопределённый срок); **автоскролл**: курсор в зоне ≤80px от верх/низ вьюпорта прокручивает страницу (скорость растёт у края); drop → оптимистичный `reorder` + `PUT /tracks/order`;
   - **пикер**: `runPickerSearch()` абортит in-flight запрос (`pickerAbortGroup.nextSignal()`) перед сбросом курсора — иначе старый запрос возвращал бы promise по раннему `return` от `isLoadingPickerPage`, и его ответ дописывался бы в сброшенный список.
 - **Добавление из библиотеки и «Любимого»**: кнопка «в плейлист» в `TrackRow` → модальный поповер `AddToPlaylistPopover` (общая проводка — `useAddToPlaylistPopover`) с **сеткой плиток** плейлистов (auto-fill `minmax(8.5rem, 1fr)`): стеклянная иконка, имя с ellipsis, атрибуция «от {username}» для соавторских, счётчик треков со склонением; пустой список — сообщение «Плейлистов пока нет». `role="dialog"` + закрытие по **Escape** и **клику/тапу вне** поповера.
 - **`SharedView`** (`/shared/:token`): публичная страница вне `AppShell`, но контейнеризация как у остальных — корень `<main class="page">` + `stack shared-view` (горизонтальные поля, max-width, центрирование, `<main>`-landmark). Загрузка по токену (404/отзыв → ErrorState с retry; **отменённый запрос не пишет error** — иначе при смене token ErrorState остался бы навсегда поверх данных), `page-header` (название + «Поделился: {owner_username}»), список треков (номер, обложка, title/author, длительность) **без кнопок воспроизведения**; аноним → CTA «Войти» с `redirect` обратно на share-ссылку; залогиненный → тихая **автоподписка** (`POST /subscribe`, дожидается `auth.initialized`, чтобы не подписаться под чужой сессией; **флаг `isSubscribing` + сравнение токена до/после await** — сменившийся токен или повторный вызов не дублируют подписку и не пишут чужой `subscribedPlaylistId`) → карточка «Плейлист добавлен в ваши плейлисты» + кнопка «Открыть плейлист» → `/playlists/{id}`.
 
 ### Иконки
 
-`AppIcon` дополнен: `playlist`, `plus`, `grip` (drag-handle), `close` (крестик удаления из плейлиста).
+`AppIcon` дополнен: `playlist`, `plus`, `grip` (drag-handle), `close` (крестик удаления из плейлиста), `note` (иконка-плейсхолдер обложки — единственный источник геометрии для `CoverPlaceholder` и плиток пикера/SharedView).
 - Service worker не реализован: офлайн-режима нет, `manifest.webmanifest` даёт только установку иконки/темы.
 - В `vite.config.ts` dev-порт `8080` (историческая документация упоминала `5173`).
 - `E2E`-сценариев нет: покрытие — только модульные тесты.
-- **Непокрытые контракты** (введены в ходе аудита, unit-тесты на них — будущий шаг): epoch-механики `dataEpoch`/`statsRequestId` в `profile.store` и `playlists.store`, бюджет ошибок поллера (`POLLING_FAILURE_BUDGET`) и 4xx-stop, дедуп параллельных 401 и ранний `isCancel`-выход в interceptor'е, `onPointerCancel` в `useSwipeSwitch`, ручная проверка сентинела при разблокировке в `useInfiniteScroll`, LRU/негативный кэш в `cover-color.service`, ленивое `@load`-извлечение цвета в `TrackRow`, Escape/outside-click в `AddToPlaylistPopover`.
+- **Непокрытые контракты** (unit-тесты на них — будущий шаг): epoch-механики `dataEpoch`/`statsRequestId` в `profile.store` и `playlists.store`, дедуп параллельных 401 и ранний `isCancel`-выход в interceptor'е, onPointerCancel в `useSwipeSwitch`, ручная проверка сентинела при разблокировке в `useInfiniteScroll`, LRU/негативный кэш в `cover-color.service`, Escape/outside-click в `AddToPlaylistPopover`, математика окна-виртуализации `TrackList` (измерение высот — покрыто косвенно, jsdom не считает layout). Покрытые недавно: restore-сбой не глушит восстановление (`isRestored` только при успехе) и возобновление поллинга при сбое `cancelDownload` (tests: `downloads.store.test.ts`).
+- Другие изменения аудита: seek-ползунок — превью на `input`/коммит на `change` (без спама `audio.currentTime`); preload `<audio>` — `metadata` вместо `auto`; `mediaSession.dispose()` при teardown; `assertShape` повсеместно в api-слое (`youtube/tracks/playlists/likes/events/admin`); единые словари статусов (`TRACK_STATUS_LABELS/TONES`), `formatDuration`, `CoverPlaceholder`, `useDebouncedWatch`; `deletingIds`/`deleteError` в `TrackList` опциональны (костыль NO_DELETING_IDS удалён); клиентская валидация пустых форм Login/Register; динамический `minlength` в `AdminView`.
 
 ## 13. Тесты
 

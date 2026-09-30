@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
@@ -15,6 +15,7 @@ import { usePlayerStore } from '@/stores/player.store'
 import { usePlaylistsStore } from '@/stores/playlists.store'
 import { useProfileStore } from '@/stores/profile.store'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 import { useAddToPlaylistPopover } from '@/composables/useAddToPlaylistPopover'
 import { formatTrackCount } from '@/utils/plural'
 import type { Track, TrackSortField, TrackSortOrder } from '@/types/track'
@@ -79,29 +80,13 @@ watch(
   { immediate: true },
 )
 
-let searchTimer: number | null = null
-
-watch(searchInput, (value) => {
-  if (searchTimer !== null) {
-    window.clearTimeout(searchTimer)
-    searchTimer = null
-  }
-
-  if (value.trim() === readRouteQuery(route.query.q)) {
+useDebouncedWatch(searchInput, () => {
+  // Значение, совпадающее с URL-запросом (синхронизация из роутера), не толкает.
+  if (searchInput.value.trim() === readRouteQuery(route.query.q)) {
     return
   }
-
-  searchTimer = window.setTimeout(() => {
-    searchTimer = null
-    void router.push({ query: buildQuery({ q: value }) })
-  }, SEARCH_DEBOUNCE_MS)
-})
-
-onUnmounted(() => {
-  if (searchTimer !== null) {
-    window.clearTimeout(searchTimer)
-  }
-})
+  void router.push({ query: buildQuery({ q: searchInput.value }) })
+}, SEARCH_DEBOUNCE_MS)
 
 function selectSort(field: TrackSortField): void {
   if (library.sortBy === field) {

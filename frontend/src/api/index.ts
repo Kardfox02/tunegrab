@@ -1,6 +1,6 @@
 export { apiClient } from './client'
 export type { AbortGroup, UnauthorizedHandler } from './client'
-export { createAbortGroup, request, setUnauthorizedHandler } from './client'
+export { createAbortGroup, hasArray, hasNumber, hasString, isApiObject, request, setUnauthorizedHandler } from './client'
 export {
   changePassword,
   getCurrentUser,
@@ -8,14 +8,15 @@ export {
   logout,
   register,
 } from './auth-api'
-export { queueDownload, searchYouTube } from './youtube-api'
 export {
   cancelDownload,
   fetchActiveDownloads,
   fetchDownloadStatus,
+  queueDownload,
   retryDownload,
+  searchYouTube,
 } from './youtube-api'
-export { deleteTrack, listTracks } from './tracks-api'
+export { deleteTrack, listTracks, uploadTrack } from './tracks-api'
 export {
   addPlaylistTrack,
   createPlaylist,
@@ -28,4 +29,9 @@ export {
   renamePlaylist,
   reorderPlaylistTracks,
   revokeShareLink,
+  subscribeToSharedPlaylist,
+  unsubscribeFromPlaylist,
 } from './playlists-api'
+export { addLike, fetchLikedTrackIds, fetchLikes, removeLike } from './likes-api'
+export { fetchListeningStats, recordListenEvent } from './events-api'
+export { clearThumbnails, fetchAdminHealth, runCleanupOrphans, runVerifyStorage } from './admin-api'

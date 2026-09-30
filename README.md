@@ -29,7 +29,28 @@ Tunegrab — самохостящийся музыкальный сервис: �
 
 ## Запуск
 
-### 1. Backend (порт 8000)
+### Вариант 1 — единый процесс (production-стиль)
+
+Собрать фронт и запустить бэк: при наличии `frontend/dist` бэк сам раздаёт SPA.
+
+```bash
+cd backend
+pip install -r requirements.txt
+alembic upgrade head
+
+# сборка фронта (Node.js 18+)
+cd ../frontend && npm install && npm run build
+
+# запуск бэка — порт 8000: и API, и SPA
+cd ../backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+Открыть `http://localhost:8000` — плеер доступен с того же порта, что и API.
+
+### Вариант 2 — dev-режим (два процесса)
+
+#### 1. Backend (порт 8000)
 
 ```bash
 cd backend
@@ -42,7 +63,9 @@ alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-### 2. Frontend (порт 8080)
+> Если `frontend/dist` существует и в dev-режиме нужен чистый API — сборку можно не делать: бэк раздаёт SPA только при наличии каталога.
+
+#### 2. Frontend (порт 8080)
 
 ```bash
 cd frontend
@@ -54,7 +77,7 @@ Vite запустится на `http://localhost:8080` и проксирует A
 
 ### 3. Открыть плеер
 
-Перейти на `http://localhost:8080`, зарегистрироваться и пользоваться.
+В dev-режиме — `http://localhost:8080`; в едином процессе — `http://localhost:8000`. Зарегистрироваться и пользоваться.
 
 ## Переменные окружения
 
@@ -64,6 +87,7 @@ Vite запустится на `http://localhost:8080` и проксирует A
 | `TUNEGRAB_FFMPEG`         | `backend/ffmpeg.exe` или `ffmpeg` из PATH | Путь к FFmpeg |
 | `TUNEGRAB_ENV`            | `development`| `production` — включает production-режим          |
 | `TUNEGRAB_ALLOWED_ORIGINS`| localhost + домен проекта | Список разрешённых CORS-источников через запятую |
+| `TUNEGRAB_DIST_DIR`       | `../frontend/dist` | Каталог собранной SPA для раздачи (отсутствует — только API) |
 
 ## Структура проекта
 
@@ -77,6 +101,7 @@ tunegrab/
 │   │   ├── schemas/        # Pydantic-схемы
 │   │   ├── services/       # Бизнес-логика (track, thumbnail, upload, ...)
 │   │   ├── middleware/     # Origin-check и пр.
+│   │   ├── static_site.py  # Раздача собранного SPA (mount assets + SPA fallback)
 │   │   ├── config.py       # Настройки
 │   │   ├── database.py     # Подключение к БД
 │   │   └── main.py         # Точка входа FastAPI

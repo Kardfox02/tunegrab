@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { hasArray, hasNumber, hasString, isApiObject, request } from './client'
 import type {
   ActiveDownloadsResponse,
   YouTubeDownloadRequest,
@@ -7,39 +7,70 @@ import type {
 } from '@/types/youtube'
 import type { Track } from '@/types/track'
 
+// Soft validation: мусорный ответ — понятная ошибка, а не NaN-progress
+// глубоко в поллере.
+const isTrackBody = (body: unknown): boolean =>
+  hasNumber(body, 'id') && hasString(body, 'status') && hasString(body, 'title')
+
+const isDownloadResponse = (body: unknown): boolean =>
+  isApiObject(body) && isTrackBody(body.track) && typeof body.queued === 'boolean'
+
 export async function searchYouTube(
   query: string,
   limit = 10,
   signal?: AbortSignal,
 ): Promise<YouTubeSearchResponse> {
-  const response = await apiClient.get<YouTubeSearchResponse>('/youtube/search', {
+  return request<YouTubeSearchResponse>({
+    url: '/youtube/search',
     params: { q: query, limit },
     signal,
+    assertShape: (body) => hasArray(body, 'items'),
+    malformedMessage: 'Malformed search response',
   })
-  return response.data
 }
 
 export async function queueDownload(payload: YouTubeDownloadRequest): Promise<YouTubeDownloadResponse> {
-  const response = await apiClient.post<YouTubeDownloadResponse>('/youtube/download', payload)
-  return response.data
+  return request<YouTubeDownloadResponse>({
+    url: '/youtube/download',
+    method: 'post',
+    data: payload,
+    assertShape: isDownloadResponse,
+    malformedMessage: 'Malformed download response',
+  })
 }
 
 export async function fetchDownloadStatus(trackId: number, signal?: AbortSignal): Promise<Track> {
-  const response = await apiClient.get<Track>(`/youtube/${trackId}`, { signal })
-  return response.data
+  return request<Track>({
+    url: `/youtube/${trackId}`,
+    signal,
+    assertShape: isTrackBody,
+    malformedMessage: 'Malformed track status response',
+  })
 }
 
 export async function fetchActiveDownloads(signal?: AbortSignal): Promise<ActiveDownloadsResponse> {
-  const response = await apiClient.get<ActiveDownloadsResponse>('/youtube/downloads/active', { signal })
-  return response.data
+  return request<ActiveDownloadsResponse>({
+    url: '/youtube/downloads/active',
+    signal,
+    assertShape: (body) => hasArray(body, 'items'),
+    malformedMessage: 'Malformed active downloads response',
+  })
 }
 
 export async function cancelDownload(trackId: number): Promise<Track> {
-  const response = await apiClient.post<Track>(`/youtube/cancel/${trackId}`)
-  return response.data
+  return request<Track>({
+    url: `/youtube/cancel/${trackId}`,
+    method: 'post',
+    assertShape: isTrackBody,
+    malformedMessage: 'Malformed cancel response',
+  })
 }
 
 export async function retryDownload(trackId: number): Promise<Track> {
-  const response = await apiClient.post<Track>(`/youtube/retry/${trackId}`)
-  return response.data
+  return request<Track>({
+    url: `/youtube/retry/${trackId}`,
+    method: 'post',
+    assertShape: isTrackBody,
+    malformedMessage: 'Malformed retry response',
+  })
 }
